@@ -1,0 +1,24 @@
+# Traefik reverse-proxy overlay.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d
+#
+# Requires TRAEFIK_HOST in .env
+# Routes: https://hermes-social.${TRAEFIK_HOST}
+#
+# Note: the base compose exposes ports 8340/8341 on the host. If you only
+# want Traefik access, set HERMES_SOCIAL_PORT and HERMES_SOCIAL_MCP_PORT
+# to unused high ports, or bind to 127.0.0.1 in your .env:
+#   HERMES_SOCIAL_PORT=127.0.0.1:8340
+
+services:
+  hermes-social:
+    expose:
+      - "8340"
+      - "8341"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.hermes-social.rule=Host(`hermes-social.${TRAEFIK_HOST}`)
+      - traefik.http.routers.hermes-social.entrypoints=websecure
+      - traefik.http.routers.hermes-social.tls.certresolver=letsencrypt
+      - traefik.http.services.hermes-social.loadbalancer.server.port=8340

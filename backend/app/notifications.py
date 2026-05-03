@@ -75,8 +75,8 @@ async def fire_push_notifications(task_id: str, status_state: str) -> None:
 # ── Webhook Notifications ──────────────────────────────────────────────────
 
 
-async def _post_webhook(payload: dict) -> None:
-    url = settings.notification_webhook_url
+async def _post_webhook(payload: dict, url_override: str = "") -> None:
+    url = url_override or settings.notification_webhook_url
     if not url:
         logger.debug("No notification_webhook_url configured; skipping")
         return
@@ -97,6 +97,11 @@ async def _post_webhook(payload: dict) -> None:
 # data_types that are purely terminal and need no notification at all.
 _SILENT_DATA_TYPES = frozenset({"acknowledgment", "ack", "thank_you"})
 
+# data_types where the agent should act autonomously (no user delivery).
+# These fire to a separate webhook route so the agent can negotiate
+# silently without the user seeing intermediate messages.
+_AGENT_ONLY_DATA_TYPES = frozenset({"coordination_request"})
+
 
 async def notify_message_received(
     contact: Any, data_type: str, data: dict, interaction_id: str
@@ -105,16 +110,24 @@ async def notify_message_received(
     if data_type in _SILENT_DATA_TYPES:
         logger.info("Skipping webhook for terminal data_type=%s from %s", data_type, contact_name)
         return
-    await _post_webhook(
-        {
-            "event": "message_received",
-            "requires_action": True,
-            "contact": contact_name,
-            "data_type": data_type,
-            "interaction_id": interaction_id,
-            "data": data,
-        }
-    )
+
+    url = settings.notification_webhook_url
+    if not url:
+        logger.debug("No notification_webhook_url configured; skipping")
+        return
+
+    if data_type in _AGENT_ONLY_DATA_TYPES:
+        url = url.replace("/a2a-inbox", "/a2a-negotiate")
+
+    payload = {
+        "event": "message_received",
+        "requires_action": data_type not in _AGENT_ONLY_DATA_TYPES,
+        "contact": contact_name,
+        "data_type": data_type,
+        "interaction_id": interaction_id,
+        "data": data,
+    }
+    await _post_webhook(payload, url_override=url)
 
 
 async def notify_interaction_updated(

@@ -2,29 +2,47 @@
 
 ## Purpose
 
-Generic agent-to-agent communication layer. Handles identity, transport,
+Agent-to-agent communication layer. Handles identity, transport,
 contact graph, permissions, message storage, and webhook notifications.
 Never interprets message content — the host agent owns all business logic.
 
 ## Architecture
 
-```
-Host Agent A                     Host Agent B
-    │                                 │
-    │  MCP (social_send, inbox, …)    │  MCP (social_send, inbox, …)
-    ▼                                 ▼
-┌──────────────┐   A2A HTTP+JSON  ┌──────────────┐
-│ hermes-social│ ◄──────────────► │ hermes-social│
-│  instance A  │                  │  instance B  │
-└──────────────┘                  └──────────────┘
-    │                                 │
-    ├─ Identity (Ed25519)             ├─ Identity (Ed25519)
-    ├─ Contact graph + grants         ├─ Contact graph + grants
-    ├─ Message store (SQLite)         ├─ Message store (SQLite)
-    └─ Webhook notifications          └─ Webhook notifications
+```mermaid
+graph LR
+    HA[Host Agent A] -->|MCP tools| HSA[hermes-social A]
+    HB[Host Agent B] -->|MCP tools| HSB[hermes-social B]
+    HSA ---|A2A HTTP JSON| HSB
+
+    HSA --- IdA[Identity, Contact Graph, Message Store, Webhook Notifications]
+
+    HSB --- IdB[Identity, Contact Graph, Message Store, Webhook Notifications]
 ```
 
 ## Message Flow
+
+```mermaid
+sequenceDiagram
+    participant HA as Host Agent
+    participant HS as hermes-social
+    participant Remote as Remote hermes-social
+
+    Note over HA,Remote: Outbound
+    HA->>HS: social_send
+    Note over HS: Build A2A message, store outbound interaction
+    HS->>Remote: POST /a2a/message send
+
+    Note over HA,Remote: Inbound
+    Remote->>HS: POST /a2a/message send
+    Note over HS: Verify JWT, check grant, store inbound interaction
+    HS->>HA: Webhook notification
+    HS-->>Remote: 200 OK ack
+
+    Note over HA,Remote: Response
+    HA->>HS: social_respond
+    Note over HS: Update interaction, build A2A response
+    HS->>Remote: POST /a2a/message send
+```
 
 1. **Outbound**: Host agent calls `social_send(contact_id, content, data_type)`.
    hermes-social builds an A2A message, stores it as an outbound interaction,

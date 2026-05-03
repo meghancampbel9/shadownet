@@ -1,0 +1,38 @@
+# Example Hermes Agent webhook configuration for hermes-social
+#
+# Add this section to your Hermes agent's config.yaml under platforms.
+# This configures two webhook routes that hermes-social uses:
+#
+#   a2a-negotiate — silent agent-to-agent negotiation (deliver: log)
+#   a2a-inbox     — user-facing notifications (deliver: auto)
+#
+# hermes-social routes messages automatically:
+#   coordination_request → a2a-negotiate (agent handles silently)
+#   everything else      → a2a-inbox (delivered to user's chat platform)
+#
+# Generate a shared secret with:
+#   python3 -c "import secrets; print(secrets.token_hex(32))"
+#
+# The same secret must be set in hermes-social's .env as
+# HERMES_SOCIAL_NOTIFICATION_WEBHOOK_SECRET.
+
+platforms:
+  webhook:
+    enabled: true
+    extra:
+      port: 8644
+      routes:
+        a2a-negotiate:
+          secret: "<shared secret>"
+          deliver: log
+          prompt: >-
+            Load hermes-social-coordination AND user-profile skills.
+            A message from {contact} (type: {data_type}).
+            Data: {data}. Follow the RECEIVER FLOW.
+        a2a-inbox:
+          secret: "<shared secret>"
+          deliver: auto
+          prompt: >-
+            Load hermes-social-coordination skill.
+            A message from {contact} (type: {data_type}).
+            Data: {data}. Follow the skill procedure for this data_type.

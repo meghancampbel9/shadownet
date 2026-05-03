@@ -1,11 +1,10 @@
 # hermes-social
 
-Generic agent-to-agent communication layer built on the
+Agent-to-agent communication layer built on the
 [A2A protocol (v1.0)](https://google.github.io/a2a/).
 
-hermes-social is a **pipe with access control** — it handles identity,
-transport, contact graph, permissions, and message storage. It never
-interprets message content. The host agent (Hermes, OpenClaw, or any
+hermes-social handles identity, transport, contact graph, permissions,
+and message storage. The host agent (Hermes, OpenClaw, or any
 A2A/MCP-compatible framework) owns all business logic.
 
 ## What it does
@@ -18,101 +17,102 @@ A2A/MCP-compatible framework) owns all business logic.
 - **MCP interface**: Tools for the host agent to send, receive, and respond
 - **Webhooks**: Notify the host agent of inbound messages
 
-## Setup
+## Quick Start
 
-### Docker (recommended)
+```bash
+git clone https://github.com/anthropics/hermes-social.git
+cd hermes-social
+./setup.sh              # generates secrets, writes .env
+docker compose up -d    # builds and starts hermes-social
+```
 
-1. Copy `backend/.env.example` to `backend/.env` and fill in values
-2. `docker compose up -d`
-3. Access the management UI at the configured external URL
-4. Add contacts via the UI or API
-5. Connect your host agent via MCP (port 8341)
-6. Install agent skills (see below)
-7. Configure the agent wake-up webhook (see below)
+`setup.sh` will:
+1. Generate JWT and webhook secrets
+2. Ask for your instance URL, agent name, and owner name
+3. Detect your Hermes agent's Docker network
+4. Optionally configure the webhook for agent notifications
+5. Write `.env` and offer to start the containers
 
-### Agent Skills
+After startup, open your configured URL to create an account and add contacts.
 
-The `skills/` directory contains Hermes agent skills that teach the agent
-how to use hermes-social's MCP tools for autonomous coordination. The deploy
-script (`deploy.sh`) automatically syncs these to your agent's skills directory.
+## Deployment Options
 
-For manual install, copy `skills/social/` into your agent's skills directory:
+### Default (plain ports)
+
+Exposes the UI on port 8340 and MCP on port 8341. Put your own reverse
+proxy (Nginx, Caddy, etc.) in front for HTTPS.
+
+```bash
+docker compose up -d
+```
+
+### With Traefik
+
+If you run Traefik, use the overlay to add labels and Let's Encrypt:
+
+```bash
+# Add TRAEFIK_HOST=your.server.com to .env first
+docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d
+```
+
+### With a test peer
+
+Spin up a second instance for local A2A testing:
+
+```bash
+# Create .env.test (copy .env, change identity values)
+docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
+```
+
+## Agent Integration
+
+### 1. Install skills
+
+Copy the coordination skills into your agent's skills directory:
 
 ```bash
 cp -r skills/social/ ~/.hermes/skills/social/
 ```
 
-### Local development
+### 2. Configure webhook routes
 
-Requires [uv](https://docs.astral.sh/uv/getting-started/installation/).
-
-```bash
-# Backend
-cd backend
-uv sync --group dev        # installs runtime + test + lint deps
-cp .env.example .env       # then edit .env
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8340
-uv run uvicorn app.mcp_run:app --host 0.0.0.0 --port 8341
-
-# Frontend (separate terminal)
-cd frontend
-npm ci
-npm run dev                # proxies /api/* to localhost:8340
-
-# Tests
-cd backend
-uv run pytest tests/
-```
-
-### Agent Wake-Up Webhook
-
-When another agent sends a message, hermes-social needs a way to wake up
-your host agent so it can process the message and respond.
-
-hermes-social POSTs a JSON payload to `NOTIFICATION_WEBHOOK_URL` whenever
-an inbound A2A message arrives. The payload includes a HMAC-SHA256 signature
-in the `X-Webhook-Signature` header (using `NOTIFICATION_WEBHOOK_SECRET`).
-
-**For Hermes Agent**, enable the built-in webhook platform adapter:
+Add two webhook routes to your agent's `config.yaml` so hermes-social
+can wake your agent when messages arrive. See
+[`agent-config.example.yaml`](agent-config.example.yaml) for the full
+config, or add this:
 
 ```yaml
-# In the Hermes agent's config.yaml
 platforms:
   webhook:
     enabled: true
     extra:
       port: 8644
       routes:
-        a2a-inbox:
-          secret: "<shared secret — same as NOTIFICATION_WEBHOOK_SECRET>"
+        a2a-negotiate:
+          secret: "<webhook secret from setup>"
+          deliver: log
           prompt: >-
-            A social message arrived from {contact} (type: {data_type}).
-            Data: {data}.
-            Load the hermes-social-coordination skill and follow its procedure.
+            Load hermes-social-coordination AND user-profile skills.
+            A message from {contact} (type: {data_type}).
+            Data: {data}. Follow the RECEIVER FLOW.
+        a2a-inbox:
+          secret: "<webhook secret from setup>"
+          deliver: auto
+          prompt: >-
+            Load hermes-social-coordination skill.
+            A message from {contact} (type: {data_type}).
+            Data: {data}. Follow the skill procedure for this data_type.
 ```
 
-The agent will deliver output to whichever platform has an active session
-(Telegram, Discord, Matrix, web terminal, etc.). To force a specific channel,
-add `deliver: telegram` (or `discord`, `matrix`) and `deliver_extra` with
-the channel-specific config.
+hermes-social routes `coordination_request` messages to `a2a-negotiate`
+(silent, `deliver: log`) and everything else to `a2a-inbox` (user-facing,
+`deliver: auto`). `deliver: auto` resolves to your first connected chat
+platform (Telegram, Discord, Slack, etc.).
 
-The prompt is intentionally minimal — all coordination logic lives in the
-`hermes-social-coordination` skill (installed from `skills/` in this repo).
-This avoids conflicting instructions between the prompt and the skill.
+### 3. Webhook payload
 
-The 120-second webhook cooldown ensures that follow-up messages during
-an active negotiation don't spawn redundant agent sessions — the
-already-running agent picks them up via `social_inbox`.
-
-Then set in hermes-social's `.env`:
-
-```
-HERMES_SOCIAL_NOTIFICATION_WEBHOOK_URL=http://<hermes-agent-host>:8644/webhooks/a2a-inbox
-HERMES_SOCIAL_NOTIFICATION_WEBHOOK_SECRET=<shared secret>
-```
-
-**For other frameworks**, point the webhook URL at any HTTP endpoint that
-can trigger an agent run. The POST body is:
+For non-Hermes agents, point `NOTIFICATION_WEBHOOK_URL` at any HTTP
+endpoint. The POST body is:
 
 ```json
 {
@@ -137,50 +137,43 @@ can trigger an agent run. The POST body is:
 
 ## Message Flow
 
-```
-User A: "coordinate dinner with B"
-  │
-  ▼
-Agent A                              Agent B
-  │ social_send(request)               │
-  ▼                                    ▼
-hermes-social A ───A2A──────► hermes-social B
-                                  │
-                                  ├─ Store interaction
-                                  └─ Webhook → Agent B (first msg only)
-                                       │
-                                       ▼
-                              Agent B wakes up, reads inbox
-                              Agent B responds autonomously
-                                       │
-Agent A reads inbox ◄─── A2A ──────────┘
-Agent A responds   ──── A2A ──────────►  Agent B reads inbox
-  ... autonomous back-and-forth ...      ... via social_inbox ...
-                                       │
-  ┌────────────────────────────────────┘
-  ▼
-Agent A: "We agreed on Thursday 7pm at X"
-  │ → Present to User A → confirm?
-  │
-User A: "yes"
-  │
-Agent A → social_respond(confirmed) ──► Agent B
-                                         │
-                                         ▼
-                                    Notify User B:
-                                    "Dinner Thursday 7pm confirmed"
-                                    User B: "confirmed" (or auto-ack)
-                                         │
-                                         ▼
-Agent A notified ◄── A2A ── final ack ──┘
-  │
-User A: "All set!"
-```
+```mermaid
+sequenceDiagram
+    actor UA as User A
+    participant AA as Agent A
+    participant HSA as hermes-social A
+    participant HSB as hermes-social B
+    participant AB as Agent B
+    actor UB as User B
 
-The webhook cooldown (120s) ensures only the **first** inbound message
-from a new conversation triggers an agent wake-up. All subsequent messages
-during active negotiation are picked up by the already-running agent
-via `social_inbox` polling.
+    UA->>AA: coordinate dinner with B
+    AA->>HSA: social_send coordination_request
+    HSA->>HSB: A2A HTTP JSON
+    AA-->>UA: Sent - I will let you know
+
+    Note over HSB: Store interaction
+    HSB->>AB: Webhook a2a-negotiate deliver log
+
+    Note over AB: Load user-profile skill and match calendars
+    AB->>HSB: social_respond response
+    HSB->>HSA: A2A HTTP JSON
+
+    Note over HSA: Store interaction
+    HSA->>AA: Webhook a2a-inbox deliver auto
+    AA-->>UA: Coffee at Zazza Friday 10am - Confirm?
+    UA->>AA: yes
+
+    AA->>HSA: social_send confirmation
+    HSA->>HSB: A2A HTTP JSON
+    HSB->>AB: Webhook a2a-inbox deliver auto
+    AB-->>UB: Meghan wants to meet at Zazza Friday 10am - Accept?
+    UB->>AB: yes
+
+    AB->>HSB: social_respond confirmed
+    HSB->>HSA: A2A HTTP JSON
+    HSA->>AA: Webhook a2a-inbox deliver auto
+    AA-->>UA: All set - Coffee Friday 10am at Zazza
+```
 
 ## Configuration
 
@@ -195,6 +188,30 @@ All settings use the `HERMES_SOCIAL_` env prefix:
 | `NOTIFICATION_WEBHOOK_URL` | Where to POST inbound message notifications |
 | `NOTIFICATION_WEBHOOK_SECRET` | HMAC-SHA256 secret for webhook signature |
 | `MCP_ENABLED` | Enable MCP server (default: true) |
+
+See [`.env.example`](.env.example) for all options.
+
+## Local Development
+
+Requires [uv](https://docs.astral.sh/uv/getting-started/installation/).
+
+```bash
+# Backend
+cd backend
+uv sync --group dev
+cp .env.example .env       # then edit
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8340
+uv run uvicorn app.mcp_run:app --host 0.0.0.0 --port 8341
+
+# Frontend (separate terminal)
+cd frontend
+npm ci
+npm run dev
+
+# Tests
+cd backend
+uv run pytest tests/
+```
 
 ## Architecture
 
