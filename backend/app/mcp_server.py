@@ -95,8 +95,15 @@ def _normalize_data_type(data_type: str, content_payload: dict) -> str:
         return "coordination_request"
     content_str = json.dumps(content_payload).lower()
     for kw in ("meeting", "coffee", "lunch", "dinner", "drinks", "brunch", "meetup"):
-        if kw in content_str and any(w in content_str for w in ("propose", "plan", "schedule", "invite", "coordinate", "want to meet", "get together")):
-            logger.info("Normalized data_type '%s' → 'coordination_request' (content match)", data_type)
+        action_words = (
+            "propose", "plan", "schedule", "invite",
+            "coordinate", "want to meet", "get together",
+        )
+        if kw in content_str and any(w in content_str for w in action_words):
+            logger.info(
+                "Normalized data_type '%s' → 'coordination_request' (content match)",
+                data_type,
+            )
             return "coordination_request"
     return data_type
 
