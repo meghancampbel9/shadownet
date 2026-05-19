@@ -1,9 +1,9 @@
-# hermes-social
+# shadownet
 
 Agent-to-agent communication layer built on the
 [A2A protocol (v1.0)](https://google.github.io/a2a/).
 
-hermes-social handles identity, transport, contact graph, permissions,
+shadownet handles identity, transport, contact graph, permissions,
 and message storage. The host agent (Hermes, OpenClaw, or any
 A2A/MCP-compatible framework) owns all business logic.
 
@@ -20,16 +20,16 @@ A2A/MCP-compatible framework) owns all business logic.
 ## Quick Start
 
 ```bash
-git clone https://github.com/anthropics/hermes-social.git
-cd hermes-social
+git clone https://github.com/meghancampbel9/shadownet.git
+cd shadownet
 ./setup.sh              # generates secrets, writes .env
-docker compose up -d    # builds and starts hermes-social
+docker compose up -d    # builds and starts shadownet
 ```
 
 `setup.sh` will:
 1. Generate JWT and webhook secrets
 2. Ask for your instance URL, agent name, and owner name
-3. Detect your Hermes agent's Docker network
+3. Detect your agent's Docker network
 4. Optionally configure the webhook for agent notifications
 5. Write `.env` and offer to start the containers
 
@@ -76,7 +76,7 @@ cp -r skills/social/ ~/.hermes/skills/social/
 
 ### 2. Configure webhook routes
 
-Add two webhook routes to your agent's `config.yaml` so hermes-social
+Add two webhook routes to your agent's `config.yaml` so shadownet
 can wake your agent when messages arrive. See
 [`agent-config.example.yaml`](agent-config.example.yaml) for the full
 config, or add this:
@@ -92,19 +92,19 @@ platforms:
           secret: "<webhook secret from setup>"
           deliver: log
           prompt: >-
-            Load hermes-social-coordination AND user-profile skills.
+            Load shadownet-coordination AND user-profile skills.
             A message from {contact} (type: {data_type}).
             Data: {data}. Follow the RECEIVER FLOW.
         a2a-inbox:
           secret: "<webhook secret from setup>"
           deliver: auto
           prompt: >-
-            Load hermes-social-coordination skill.
+            Load shadownet-coordination skill.
             A message from {contact} (type: {data_type}).
             Data: {data}. Follow the skill procedure for this data_type.
 ```
 
-hermes-social routes `coordination_request` messages to `a2a-negotiate`
+shadownet routes `coordination_request` messages to `a2a-negotiate`
 (silent, `deliver: log`) and everything else to `a2a-inbox` (user-facing,
 `deliver: auto`). `deliver: auto` resolves to your first connected chat
 platform (Telegram, Discord, Slack, etc.).
@@ -141,8 +141,8 @@ endpoint. The POST body is:
 sequenceDiagram
     actor UA as User A
     participant AA as Agent A
-    participant HSA as hermes-social A
-    participant HSB as hermes-social B
+    participant HSA as shadownet A
+    participant HSB as shadownet B
     participant AB as Agent B
     actor UB as User B
 
@@ -177,7 +177,7 @@ sequenceDiagram
 
 ## Configuration
 
-All settings use the `HERMES_SOCIAL_` env prefix:
+All settings use the `SHADOWNET_` env prefix:
 
 | Variable | Description |
 |----------|-------------|

@@ -19,7 +19,7 @@ def require_test_env():
 
     if settings.environment != "test":
         pytest.fail(
-            f"Tests must run with HERMES_SOCIAL_ENVIRONMENT=test, got '{settings.environment}'"
+            f"Tests must run with SHADOWNET_ENVIRONMENT=test, got '{settings.environment}'"
         )
 
 

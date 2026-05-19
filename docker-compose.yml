@@ -1,24 +1,24 @@
 services:
-  hermes-social:
+  shadownet:
     build: .
-    container_name: hermes-social
+    container_name: shadownet
     restart: unless-stopped
     ports:
-      - "${HERMES_SOCIAL_PORT:-8340}:8340"
-      - "${HERMES_SOCIAL_MCP_PORT:-8341}:8341"
+      - "${SHADOWNET_PORT:-8340}:8340"
+      - "${SHADOWNET_MCP_PORT:-8341}:8341"
     env_file:
       - .env
     environment:
-      - HERMES_SOCIAL_DATABASE_URL=sqlite:////app/data/hermes_social.db
-      - HERMES_SOCIAL_DATA_DIR=/app/data
+      - SHADOWNET_DATABASE_URL=sqlite:////app/data/shadownet.db
+      - SHADOWNET_DATA_DIR=/app/data
     volumes:
       - ./data:/app/data
     networks:
       - default
-      - hermes-network
+      - agent-network
 
 networks:
   default:
-  hermes-network:
+  agent-network:
     external: true
-    name: ${HERMES_NETWORK:-hermes-network}
+    name: ${AGENT_NETWORK:-agent-network}

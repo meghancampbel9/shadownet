@@ -3,24 +3,36 @@
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
 #
-# Spins up a second hermes-social for local A2A testing.
+# Spins up a second shadownet for local A2A testing.
 # Requires .env.test (copy .env and change identity values).
 
 services:
-  hermes-social-test:
+  shadownet-test:
     build: .
-    container_name: hermes-social-test
+    container_name: shadownet-test
     restart: unless-stopped
     ports:
-      - "${HERMES_SOCIAL_TEST_PORT:-8350}:8340"
-      - "${HERMES_SOCIAL_TEST_MCP_PORT:-8351}:8341"
+      - "${SHADOWNET_TEST_PORT:-8350}:8340"
+      - "${SHADOWNET_TEST_MCP_PORT:-8351}:8341"
     env_file:
       - .env.test
     environment:
-      - HERMES_SOCIAL_DATABASE_URL=sqlite:////app/data/hermes_social.db
-      - HERMES_SOCIAL_DATA_DIR=/app/data
+      - SHADOWNET_DATABASE_URL=sqlite:////app/data/shadownet.db
+      - SHADOWNET_DATA_DIR=/app/data
     volumes:
       - ./data-test:/app/data
     networks:
       - default
-      - hermes-network
+      - agent-network
+      - test-agent-network
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.shadownet-test.rule=Host(`shadownet-test.${TRAEFIK_HOST}`)
+      - traefik.http.routers.shadownet-test.entrypoints=websecure
+      - traefik.http.routers.shadownet-test.tls.certresolver=letsencrypt
+      - traefik.http.services.shadownet-test.loadbalancer.server.port=8340
+
+networks:
+  test-agent-network:
+    external: true
+    name: ${TEST_AGENT_NETWORK:-hermes-agent-test_default}

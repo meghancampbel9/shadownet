@@ -1,5 +1,5 @@
 [project]
-name = "hermes-social"
+name = "shadownet"
 version = "0.1.0"
 description = "A2A communication layer for agent-to-agent messaging"
 requires-python = ">=3.12"

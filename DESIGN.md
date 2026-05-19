@@ -1,4 +1,4 @@
-# hermes-social — Design
+# shadownet — Design
 
 ## Purpose
 
@@ -10,8 +10,8 @@ Never interprets message content — the host agent owns all business logic.
 
 ```mermaid
 graph LR
-    HA[Host Agent A] -->|MCP tools| HSA[hermes-social A]
-    HB[Host Agent B] -->|MCP tools| HSB[hermes-social B]
+    HA[Host Agent A] -->|MCP tools| HSA[shadownet A]
+    HB[Host Agent B] -->|MCP tools| HSB[shadownet B]
     HSA ---|A2A HTTP JSON| HSB
 
     HSA --- IdA[Identity, Contact Graph, Message Store, Webhook Notifications]
@@ -24,8 +24,8 @@ graph LR
 ```mermaid
 sequenceDiagram
     participant HA as Host Agent
-    participant HS as hermes-social
-    participant Remote as Remote hermes-social
+    participant HS as shadownet
+    participant Remote as Remote shadownet
 
     Note over HA,Remote: Outbound
     HA->>HS: social_send
@@ -45,16 +45,16 @@ sequenceDiagram
 ```
 
 1. **Outbound**: Host agent calls `social_send(contact_id, content, data_type)`.
-   hermes-social builds an A2A message, stores it as an outbound interaction,
+   shadownet builds an A2A message, stores it as an outbound interaction,
    and POSTs it to the remote agent's endpoint.
 
-2. **Inbound**: Remote agent POSTs to `/a2a/message:send`. hermes-social
+2. **Inbound**: Remote agent POSTs to `/a2a/message:send`. shadownet
    authenticates via JWT, checks the contact's grant, stores the message
    as an inbound interaction, fires a webhook notification to the host agent,
    and returns an ack.
 
 3. **Response**: Host agent calls `social_respond(interaction_id, content, data_type)`.
-   hermes-social updates the interaction, builds an A2A response, and sends it
+   shadownet updates the interaction, builds an A2A response, and sends it
    to the original sender.
 
 ## Data Model
@@ -91,7 +91,7 @@ message types however it wants.
 
 ## Webhook Notifications
 
-When `HERMES_SOCIAL_NOTIFICATION_WEBHOOK_URL` is configured, hermes-social
+When `SHADOWNET_NOTIFICATION_WEBHOOK_URL` is configured, shadownet
 POSTs structured JSON events to the host agent:
 
 - `message_received` — new inbound message (requires_action: true)

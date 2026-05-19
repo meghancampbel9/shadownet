@@ -1,7 +1,7 @@
 ---
-name: hermes-social-coordination
-description: Coordinate meetups between agents via Hermes Social. Fully autonomous negotiation — agents use calendar and preference data to agree on a plan, then present it to users for one-tap confirmation.
-version: 6.0.0
+name: shadownet-coordination
+description: Coordinate meetups between agents via ShadowNet. Fully autonomous negotiation — agents use calendar and preference data to agree on a plan, then present it to users for one-tap confirmation.
+version: 7.0.0
 metadata:
   hermes:
     tags: [social, coordination, meetups, scheduling, agent-to-agent]
@@ -18,6 +18,20 @@ confirm.
 ## Roles
 
 Every coordination has an **initiator** and a **receiver**.
+
+---
+
+## Tools
+
+| Tool | When to use |
+|------|-------------|
+| `social_coordinate(contact_id, activity, details)` | Initiator Step 1: start a coordination |
+| `social_confirm_plan(contact_id)` | Initiator Step 3: user approved the plan |
+| `social_accept_plan(interaction_id)` | Receiver Step 4: user accepted the plan |
+
+These tools handle all data formatting, routing, and state management
+automatically. Do NOT use `social_send` or `social_respond` for
+coordination flows.
 
 ---
 
@@ -42,28 +56,10 @@ When woken by a webhook, identify which step you're in by `data_type`:
 
 ## INITIATOR FLOW (your user asked to plan something)
 
-### Step 1 — Gather context and send a rich request
-
-Load the **user-profile** skill to get your user's calendar, preferences,
-interests, and favorite venues. Then send a RICH request:
+### Step 1 — Send the coordination request
 
 ```
-social_send(contact_id, content=JSON.stringify({
-  "activity": "coffee",
-  "proposed_dates": ["Friday May 1", "Friday May 8"],
-  "proposed_times": ["9:00-12:00"],
-  "location_area": "Berlin Mitte",
-  "initiator_preferences": {
-    "interests": ["specialty coffee", "brunch", "walks"],
-    "dietary": "none",
-    "vibe": "casual, relaxed morning"
-  },
-  "initiator_availability": {
-    "Friday May 1": "free 9am-1pm",
-    "Friday May 8": "free 9am-11am"
-  },
-  "flexibility": "open to other suggestions"
-}), data_type="coordination_request")
+social_coordinate(contact_id, activity="coffee", details="Thursday morning before work")
 ```
 
 ### Step 2 — Tell the user and END the session
@@ -72,25 +68,29 @@ Output ONE message:
 
 > Sent a coordination request to [contact]. I'll notify you when we've agreed on a plan.
 
-DONE. Do NOT poll. A webhook will start a new session when the response arrives.
+DONE. Do NOT poll. Do NOT call social_inbox. A webhook will start a new
+session when the response arrives.
 
 ### Step 3 — Present the agreed plan (webhook: data_type=response)
 
-The receiver's agent sent back an agreed plan. Present it to the user:
+The receiver's agent sent back an agreed plan. Present it to the user
+concisely and ask them to confirm:
 
-> Agreed with Test Friend: Coffee at Zazza (Lehrter Str 24e),
-> Friday May 1 at 10am. Confirm?
+> Coffee at Zazza (Lehrter Str 24e), Friday May 1 at 10am. Confirm?
 
-Wait for the user to confirm, then:
+Output ONLY that question. **STOP. Do NOT call any tool yet.** Wait for
+the user to reply.
+
+When the user confirms (yes, ok, confirm, sure, sounds good), call:
 
 ```
-social_send(contact_id, content=JSON.stringify({
-  "status": "confirmed",
-  "plan": { ... the agreed plan ... }
-}), data_type="confirmation")
+social_confirm_plan(contact_id)
 ```
 
-Output: "Sent! You'll be notified when they accept." DONE.
+Output EXACTLY: **"Sent confirmation. I'll let you know when they accept."**
+
+**WARNING**: The plan is NOT finalized yet. Do NOT say "confirmed" or
+"all set" at this stage.
 
 ### Step 4 — Final confirmation (webhook: data_type=confirmed)
 
@@ -106,9 +106,9 @@ DONE. The coordination is complete.
 
 ### Step 1 — Read the request and YOUR user's data
 
-The inbound message contains the initiator's availability, preferences,
-and proposed dates/times. Load the **user-profile** skill to get YOUR
-user's calendar, preferences, interests, and favorite venues.
+The inbound message contains the initiator's activity and details.
+Load the **user-profile** skill to get YOUR user's calendar, preferences,
+interests, and favorite venues.
 
 ### Step 2 — Find the best match AUTONOMOUSLY
 
@@ -149,13 +149,16 @@ The initiator's user approved the plan. NOW notify your user:
 > [Name] wants to meet: Coffee at Zazza (Lehrter Str 24e),
 > Friday May 1 at 10am. Accept?
 
-Wait for user response. If they accept:
+Output ONLY that message. **STOP. Do NOT call any tool yet.** Wait for
+the user to reply.
+
+When the user accepts (yes, accept, ok, sure, sounds good), call:
 
 ```
-social_respond(interaction_id, content='{"status": "confirmed"}', data_type="confirmed")
+social_accept_plan(interaction_id="<from webhook>")
 ```
 
-Output: "Confirmed! Enjoy." DONE — this is the final step, nothing else happens.
+Output: "Confirmed! Enjoy." DONE.
 
 ---
 
@@ -163,7 +166,7 @@ Output: "Confirmed! Enjoy." DONE — this is the final step, nothing else happen
 
 | data_type | Sent by | Meaning |
 |---|---|---|
-| `coordination_request` | Initiator | Rich request with availability + preferences |
+| `coordination_request` | Initiator | Request with activity + details |
 | `response` | Receiver | Agreed plan (receiver negotiated autonomously) |
 | `confirmation` | Initiator | "My user approved this plan" |
 | `confirmed` | Receiver | "My user approved too — we're set" |
@@ -179,7 +182,10 @@ Output: "Confirmed! Enjoy." DONE — this is the final step, nothing else happen
 
 ## Pitfalls
 
+- **Use the purpose-built tools.** `social_coordinate` to start, `social_confirm_plan` to confirm, `social_accept_plan` to accept. Do NOT use `social_send` for coordination.
 - **DO NOT ask the receiver's user during negotiation.** You have their preferences and calendar — use them.
-- **DO NOT poll.** Webhooks handle all notifications.
+- **DO NOT poll.** Do NOT call `social_inbox` after sending. Webhooks handle all notifications.
+- **DO NOT say "confirmed" prematurely.** After confirming (Step 3), the plan is NOT final. Say "Sent confirmation. I'll let you know when they accept."
+- **Accept means accept.** When you ask a user to confirm/accept and they reply with ANY affirmative (yes, ok, accept, sure, sounds good), act on it. Do not ask for clarification.
 - **STOP on confirmed.** Never respond to a confirmed message.
-- **No old tools.** `social_coordinate`, `social_check_proposals`, `social_respond_proposal` do not exist.
+- **No old tools.** `social_coordinate_old`, `social_check_proposals`, `social_respond_proposal` do not exist.

@@ -100,7 +100,13 @@ _SILENT_DATA_TYPES = frozenset({"acknowledgment", "ack", "thank_you"})
 # data_types where the agent should act autonomously (no user delivery).
 # These fire to a separate webhook route so the agent can negotiate
 # silently without the user seeing intermediate messages.
-_AGENT_ONLY_DATA_TYPES = frozenset({"coordination_request"})
+# Includes common LLM-invented variants that social_send normalization
+# should already catch, but we double-check here as a safety net.
+_AGENT_ONLY_DATA_TYPES = frozenset({
+    "coordination_request",
+    "meeting_proposal", "meeting_request", "meetup_request",
+    "coffee_proposal", "schedule_request", "planning_request",
+})
 
 
 async def notify_message_received(
