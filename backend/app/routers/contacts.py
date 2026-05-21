@@ -138,7 +138,10 @@ async def add_contact(
         a2a_url = interfaces[0].get("url", "")
     if not a2a_url:
         a2a_url = card.get("url", "")
-    endpoint = a2a_url + "/message:send" if a2a_url else body.agent_endpoint.rstrip("/") + "/a2a/message:send"
+    if a2a_url:
+        endpoint = a2a_url + "/message:send"
+    else:
+        endpoint = body.agent_endpoint.rstrip("/") + "/a2a/message:send"
 
     contact = Contact(
         name=display_name,

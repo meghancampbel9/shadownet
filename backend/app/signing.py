@@ -71,7 +71,9 @@ def get_sns_client() -> SNSClient | None:
     return _sns_client
 
 
-def build_outbound_headers(audience_did: str, credential_jwts: list[str] | None = None) -> dict[str, str]:
+def build_outbound_headers(
+    audience_did: str, credential_jwts: list[str] | None = None
+) -> dict[str, str]:
     """Build A2A handshake headers for an outbound request."""
     keypair = get_keypair()
     my_did = get_did()

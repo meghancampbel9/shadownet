@@ -17,7 +17,7 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.database import engine
-from app.models import AccessGrant, Contact, GrantType, InteractionContext, _utcnow
+from app.models import AccessGrant, Contact, InteractionContext, _utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +81,10 @@ def social_contacts(query: str = "") -> str:
         contacts = session.exec(select(Contact)).all()
         results = []
         for c in contacts:
-            if query and query.lower() not in c.name.lower() and query.lower() not in c.shadowname.lower():
-                continue
+            if query:
+                q = query.lower()
+                if q not in c.name.lower() and q not in c.shadowname.lower():
+                    continue
             results.append(
                 {
                     "id": c.id,
@@ -209,7 +211,10 @@ async def social_add_contact(
         except Exception as exc:
             return json.dumps({"error": f"SNS resolution failed: {exc}", "shadowname": shadowname})
     else:
-        return json.dumps({"error": "SNS not configured — cannot resolve shadowname", "shadowname": shadowname})
+        return json.dumps({
+            "error": "SNS not configured — cannot resolve shadowname",
+            "shadowname": shadowname,
+        })
 
     local_part = shadowname.split("@")[0] if "@" in shadowname else shadowname
     name = displayName or local_part

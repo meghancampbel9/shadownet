@@ -20,8 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlmodel import Session
 
-from app.models import AccessGrant, Contact, GrantType, InteractionContext
-
+from app.models import Contact, InteractionContext
 
 # ── Webhook Notifications ─────────────────────────────────────────────────────
 
@@ -81,7 +80,8 @@ class TestWebhookPayload:
         contact.id = "contact-123"
 
         with patch("app.notifications.settings") as mock_settings, \
-             patch("app.notifications._post_webhook_with_retry", new_callable=AsyncMock) as mock_post:
+             patch("app.notifications._post_webhook_with_retry",
+                   new_callable=AsyncMock) as mock_post:
             mock_settings.notification_webhook_url = "http://agent:8644/webhooks/a2a-inbox"
             mock_settings.notification_negotiate_url = ""
             mock_settings.notification_webhook_secret = "secret"
@@ -113,7 +113,8 @@ class TestWebhookPayload:
         contact.id = "contact-123"
 
         with patch("app.notifications.settings") as mock_settings, \
-             patch("app.notifications._post_webhook_with_retry", new_callable=AsyncMock) as mock_post:
+             patch("app.notifications._post_webhook_with_retry",
+                   new_callable=AsyncMock) as mock_post:
             mock_settings.notification_webhook_url = "http://agent:8644/webhooks/a2a-inbox"
             mock_settings.notification_negotiate_url = "http://agent:8644/webhooks/a2a-negotiate"
             mock_settings.notification_webhook_secret = "secret"
@@ -139,7 +140,8 @@ class TestWebhookPayload:
         contact.id = "contact-123"
 
         with patch("app.notifications.settings") as mock_settings, \
-             patch("app.notifications._post_webhook_with_retry", new_callable=AsyncMock) as mock_post:
+             patch("app.notifications._post_webhook_with_retry",
+                   new_callable=AsyncMock) as mock_post:
             mock_settings.notification_webhook_url = "http://agent:8644/webhooks/a2a-inbox"
             mock_settings.notification_negotiate_url = "http://agent:8644/webhooks/a2a-negotiate"
             mock_settings.notification_webhook_secret = "secret"
@@ -165,7 +167,8 @@ class TestWebhookPayload:
         contact.id = "contact-123"
 
         with patch("app.notifications.settings") as mock_settings, \
-             patch("app.notifications._post_webhook_with_retry", new_callable=AsyncMock) as mock_post:
+             patch("app.notifications._post_webhook_with_retry",
+                   new_callable=AsyncMock) as mock_post:
             mock_settings.notification_webhook_url = "http://agent:8644/webhooks/a2a-inbox"
             mock_settings.notification_negotiate_url = ""
             mock_settings.notification_webhook_secret = "secret"
@@ -187,7 +190,8 @@ class TestWebhookPayload:
         contact.id = "c-1"
 
         with patch("app.notifications.settings") as mock_settings, \
-             patch("app.notifications._post_webhook_with_retry", new_callable=AsyncMock) as mock_post:
+             patch("app.notifications._post_webhook_with_retry",
+                   new_callable=AsyncMock) as mock_post:
             mock_settings.notification_webhook_url = "http://agent:8644/webhooks/test"
             mock_settings.notification_webhook_secret = "s"
 
@@ -464,7 +468,10 @@ class TestExtractDataPart:
 
         body = {
             "message": {
-                "parts": [{"data": {"type": "message", "text": "hi"}, "mediaType": "application/json"}]
+                "parts": [
+                    {"data": {"type": "message", "text": "hi"},
+                     "mediaType": "application/json"}
+                ]
             }
         }
         dtype, data, iid = extract_data_part(body)
@@ -545,7 +552,7 @@ class TestOutboundTransport:
             mock_client.__aexit__ = AsyncMock(return_value=False)
             MockClient.return_value = mock_client
 
-            result = await send_a2a_message(
+            await send_a2a_message(
                 "https://peer.example/a2a/message:send",
                 {"message": {"parts": []}},
                 peer_did="",
@@ -582,7 +589,8 @@ class TestOutboundTransport:
         from app.executor import send_a2a_message
 
         with patch("app.executor.httpx.AsyncClient") as MockClient, \
-             patch("app.executor._get_outbound_headers", return_value={"Authorization": "Bearer tok"}):
+             patch("app.executor._get_outbound_headers",
+                   return_value={"Authorization": "Bearer tok"}):
             mock_client = AsyncMock()
             mock_resp = MagicMock()
             mock_resp.status_code = 200
