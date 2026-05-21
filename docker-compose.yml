@@ -1,55 +1,24 @@
 services:
-  hermes-social:
+  shadownet:
     build: .
-    container_name: hermes-social
+    container_name: shadownet
     restart: unless-stopped
-    expose:
-      - "8340"
-      - "8341"
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.hermes-social.rule=Host(`hermes-social.${TRAEFIK_HOST}`)
-      - traefik.http.routers.hermes-social.entrypoints=websecure
-      - traefik.http.routers.hermes-social.tls.certresolver=letsencrypt
-      - traefik.http.services.hermes-social.loadbalancer.server.port=8340
+    ports:
+      - "${SHADOWNET_PORT:-8340}:8340"
+      - "${SHADOWNET_MCP_PORT:-8341}:8341"
     env_file:
       - .env
     environment:
-      - HERMES_SOCIAL_DATABASE_URL=sqlite:////app/data/hermes_social.db
-      - HERMES_SOCIAL_DATA_DIR=/app/data
+      - SHADOWNET_DATABASE_URL=sqlite:////app/data/shadownet.db
+      - SHADOWNET_DATA_DIR=/app/data
     volumes:
       - ./data:/app/data
     networks:
       - default
-      - hermes-network
-
-  # Test peer instance — remove after testing
-  hermes-social-test:
-    build: .
-    container_name: hermes-social-test
-    restart: unless-stopped
-    expose:
-      - "8340"
-      - "8341"
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.hermes-social-test.rule=Host(`hermes-social-test.${TRAEFIK_HOST}`)
-      - traefik.http.routers.hermes-social-test.entrypoints=websecure
-      - traefik.http.routers.hermes-social-test.tls.certresolver=letsencrypt
-      - traefik.http.services.hermes-social-test.loadbalancer.server.port=8340
-    env_file:
-      - .env.test
-    environment:
-      - HERMES_SOCIAL_DATABASE_URL=sqlite:////app/data/hermes_social.db
-      - HERMES_SOCIAL_DATA_DIR=/app/data
-    volumes:
-      - ./data-test:/app/data
-    networks:
-      - default
-      - hermes-network
+      - agent-network
 
 networks:
   default:
-  hermes-network:
+  agent-network:
     external: true
-    name: ${HERMES_NETWORK:-hermes-network}
+    name: ${AGENT_NETWORK:-agent-network}

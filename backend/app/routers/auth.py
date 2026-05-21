@@ -53,6 +53,8 @@ def _create_token(user: User) -> str:
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 def register(body: RegisterRequest, session: Session = Depends(get_session)):
+    if not settings.allow_registration:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Registration is disabled")
     existing = session.exec(select(User).where(User.email == body.email)).first()
     if existing:
         raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")

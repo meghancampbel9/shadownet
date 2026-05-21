@@ -11,7 +11,7 @@ class ApiError extends Error {
 }
 
 function baseUrl(): string {
-  const stored = localStorage.getItem("hermes_base_url");
+  const stored = localStorage.getItem("shadownet_base_url");
   if (stored) return stored;
   return window.location.origin;
 }
@@ -26,7 +26,7 @@ async function request<T>(path: string, init: RequestInit = {}, skipAuth = false
   };
 
   if (!skipAuth) {
-    const token = localStorage.getItem("hermes_token");
+    const token = localStorage.getItem("shadownet_token");
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
 

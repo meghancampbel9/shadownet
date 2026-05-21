@@ -15,7 +15,7 @@ export function Shell() {
     <div className="min-h-screen flex flex-col">
       <header className="border-b border-border bg-surface-1 px-4 h-12 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-6">
-          <span className="text-accent font-semibold text-sm tracking-wider">hermes-social</span>
+          <span className="text-accent font-semibold text-sm tracking-wider">shadownet</span>
           <nav className="flex items-center gap-1">
             {links.map(({ to, icon: Icon, label }) => (
               <NavLink

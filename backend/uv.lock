@@ -484,7 +484,7 @@ wheels = [
 ]
 
 [[package]]
-name = "hermes-social"
+name = "shadownet"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
@@ -498,7 +498,6 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyjwt", extra = ["crypto"] },
     { name = "pynacl" },
-    { name = "python-dotenv" },
     { name = "sqlmodel" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -522,7 +521,6 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.6,<3" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10,<3" },
     { name = "pynacl", specifier = ">=1.5,<2" },
-    { name = "python-dotenv", specifier = ">=1.0,<2" },
     { name = "sqlmodel", specifier = ">=0.0.22,<1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32,<1" },
 ]

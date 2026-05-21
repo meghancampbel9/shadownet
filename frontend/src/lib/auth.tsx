@@ -26,33 +26,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    setToken(localStorage.getItem("hermes_token"));
-    setUserId(localStorage.getItem("hermes_user_id"));
-    setUserName(localStorage.getItem("hermes_user_name"));
-    setBaseUrlState(localStorage.getItem("hermes_base_url"));
+    setToken(localStorage.getItem("shadownet_token"));
+    setUserId(localStorage.getItem("shadownet_user_id"));
+    setUserName(localStorage.getItem("shadownet_user_name"));
+    setBaseUrlState(localStorage.getItem("shadownet_base_url"));
     setIsReady(true);
   }, []);
 
   const login = useCallback((resp: TokenResponse) => {
-    localStorage.setItem("hermes_token", resp.access_token);
-    localStorage.setItem("hermes_user_id", resp.user_id);
-    localStorage.setItem("hermes_user_name", resp.name);
+    localStorage.setItem("shadownet_token", resp.access_token);
+    localStorage.setItem("shadownet_user_id", resp.user_id);
+    localStorage.setItem("shadownet_user_name", resp.name);
     setToken(resp.access_token);
     setUserId(resp.user_id);
     setUserName(resp.name);
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.removeItem("hermes_token");
-    localStorage.removeItem("hermes_user_id");
-    localStorage.removeItem("hermes_user_name");
+    localStorage.removeItem("shadownet_token");
+    localStorage.removeItem("shadownet_user_id");
+    localStorage.removeItem("shadownet_user_name");
     setToken(null);
     setUserId(null);
     setUserName(null);
   }, []);
 
   const setBackend = useCallback((url: string) => {
-    localStorage.setItem("hermes_base_url", url);
+    localStorage.setItem("shadownet_base_url", url);
     setBaseUrlState(url);
   }, []);
 

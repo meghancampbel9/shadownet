@@ -21,16 +21,16 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("hermes-social starting up")
+    logger.info("shadownet starting up")
     init_db()
     init_identity()
     logger.info("Agent card (A2A v1.0): %s/.well-known/agent-card.json", settings.external_url)
     yield
-    logger.info("hermes-social shutting down")
+    logger.info("shadownet shutting down")
 
 
 app = FastAPI(
-    title="hermes-social",
+    title="shadownet",
     description="Agent-to-agent communication layer",
     version="0.3.0",
     lifespan=lifespan,

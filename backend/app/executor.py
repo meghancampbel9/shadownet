@@ -160,7 +160,9 @@ async def handle_inbound(
 
     from app.notifications import notify_message_received
 
-    notify_message_received(contact, data_type, data, ictx.id)
+    # TODO: migrate to a proper task manager so notifications are truly fire-and-forget
+    # without blocking the ack response to the sender.
+    await notify_message_received(contact, data_type, data, ictx.id)
 
     return message_response(
         data_part(

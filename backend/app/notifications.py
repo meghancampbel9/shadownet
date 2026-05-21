@@ -13,7 +13,7 @@ import logging
 import uuid
 from typing import Any
 
-import httpx
+from httpx import AsyncClient
 
 from app.config import settings
 
@@ -40,7 +40,7 @@ def register_push_config(task_id: str, config: dict) -> dict:
     return entry
 
 
-def fire_push_notifications(task_id: str, status_state: str) -> None:
+async def fire_push_notifications(task_id: str, status_state: str) -> None:
     configs = _push_configs.get(task_id, [])
     if not configs:
         return
@@ -53,29 +53,30 @@ def fire_push_notifications(task_id: str, status_state: str) -> None:
         }
     }
 
-    for config in configs:
-        url = config.get("url", "")
-        if not url:
-            continue
-        try:
-            headers = {"Content-Type": "application/json"}
-            auth = config.get("authentication")
-            if auth:
-                scheme = auth.get("scheme", "Bearer")
-                creds = auth.get("credentials", "")
-                if creds:
-                    headers["Authorization"] = f"{scheme} {creds}"
-            httpx.post(url, json=payload, headers=headers, timeout=15)
-            logger.info("Push notification sent to %s for task %s", url, task_id)
-        except Exception as exc:
-            logger.warning("Push notification to %s failed: %s", url, exc)
+    async with AsyncClient(timeout=15) as client:
+        for config in configs:
+            url = config.get("url", "")
+            if not url:
+                continue
+            try:
+                headers = {"Content-Type": "application/json"}
+                auth = config.get("authentication")
+                if auth:
+                    scheme = auth.get("scheme", "Bearer")
+                    creds = auth.get("credentials", "")
+                    if creds:
+                        headers["Authorization"] = f"{scheme} {creds}"
+                await client.post(url, json=payload, headers=headers)
+                logger.info("Push notification sent to %s for task %s", url, task_id)
+            except Exception as exc:
+                logger.warning("Push notification to %s failed: %s", url, exc)
 
 
 # ── Webhook Notifications ──────────────────────────────────────────────────
 
 
-def _post_webhook(payload: dict) -> None:
-    url = settings.notification_webhook_url
+async def _post_webhook(payload: dict, url_override: str = "") -> None:
+    url = url_override or settings.notification_webhook_url
     if not url:
         logger.debug("No notification_webhook_url configured; skipping")
         return
@@ -86,7 +87,8 @@ def _post_webhook(payload: dict) -> None:
         if secret:
             sig = hmac_mod.new(secret.encode(), body, hashlib.sha256).hexdigest()
             headers["X-Webhook-Signature"] = sig
-        httpx.post(url, content=body, headers=headers, timeout=10)
+        async with AsyncClient(timeout=10) as client:
+            await client.post(url, content=body, headers=headers)
         logger.info("Webhook notification sent: %s", payload.get("event"))
     except Exception as exc:
         logger.warning("Webhook notification to %s failed: %s", url, exc)
@@ -95,15 +97,43 @@ def _post_webhook(payload: dict) -> None:
 # data_types that are purely terminal and need no notification at all.
 _SILENT_DATA_TYPES = frozenset({"acknowledgment", "ack", "thank_you"})
 
+# data_types where the agent should act autonomously (no user delivery).
+# These fire to a separate webhook route so the agent can negotiate
+# silently without the user seeing intermediate messages.
+# Includes common LLM-invented variants that social_send normalization
+# should already catch, but we double-check here as a safety net.
+_AGENT_ONLY_DATA_TYPES = frozenset(
+    {
+        "coordination_request",
+        "meeting_proposal",
+        "meeting_request",
+        "meetup_request",
+        "coffee_proposal",
+        "schedule_request",
+        "planning_request",
+    }
+)
 
-def notify_message_received(contact: Any, data_type: str, data: dict, interaction_id: str) -> None:
+
+async def notify_message_received(
+    contact: Any, data_type: str, data: dict, interaction_id: str
+) -> None:
     contact_name = contact.name if hasattr(contact, "name") else str(contact)
     if data_type in _SILENT_DATA_TYPES:
         logger.info("Skipping webhook for terminal data_type=%s from %s", data_type, contact_name)
         return
+
+    url = settings.notification_webhook_url
+    if not url:
+        logger.debug("No notification_webhook_url configured; skipping")
+        return
+
+    if data_type in _AGENT_ONLY_DATA_TYPES:
+        url = url.replace("/a2a-inbox", "/a2a-negotiate")
+
     payload = {
         "event": "message_received",
-        "requires_action": True,
+        "requires_action": data_type not in _AGENT_ONLY_DATA_TYPES,
         "contact": contact_name,
         "data_type": data_type,
         "interaction_id": interaction_id,
@@ -112,14 +142,14 @@ def notify_message_received(contact: Any, data_type: str, data: dict, interactio
     from app.inbox_stream import publish as publish_inbox_event
 
     publish_inbox_event(payload)
-    _post_webhook(payload)
+    await _post_webhook(payload, url_override=url)
 
 
-def notify_interaction_updated(
+async def notify_interaction_updated(
     contact: Any, interaction_id: str, status: str, data: dict | None = None
 ) -> None:
     contact_name = contact.name if hasattr(contact, "name") else str(contact)
-    _post_webhook(
+    await _post_webhook(
         {
             "event": "interaction_updated",
             "requires_action": False,

@@ -33,9 +33,9 @@ export function SetupPage() {
     <div className="min-h-screen flex items-center justify-center p-6">
       <div className="w-full max-w-md space-y-6">
         <div>
-          <h1 className="text-accent text-xl font-semibold tracking-wider">hermes-social</h1>
+          <h1 className="text-accent text-xl font-semibold tracking-wider">shadownet</h1>
           <p className="text-muted text-xs mt-2 leading-relaxed">
-            Enter the URL of your hermes-social backend. This is the server you deployed — there is no central server.
+            Enter the URL of your shadownet backend. This is the server you deployed — there is no central server.
           </p>
         </div>
 
@@ -46,7 +46,7 @@ export function SetupPage() {
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleConnect()}
-            placeholder="https://hermes-social.yourdomain.com"
+            placeholder="https://shadownet.yourdomain.com"
             className="w-full bg-surface-2 border border-border rounded px-3 py-2.5 text-sm text-fg placeholder:text-zinc-600 focus:outline-none focus:border-accent/50"
           />
         </div>

@@ -226,7 +226,9 @@ async def a2a_webhook(request: Request, session: Session = Depends(get_session))
 
             contact = session.get(Contact, ictx.contact_id) if ictx.contact_id else None
             if contact:
-                notify_interaction_updated(contact, ictx.id, ictx.status)
+                # TODO: migrate to a proper task manager so notifications are truly fire-and-forget
+                # without blocking the webhook response.
+                await notify_interaction_updated(contact, ictx.id, ictx.status)
 
             logger.info("Webhook updated interaction %s to %s", ictx.id, ictx.status)
         else:

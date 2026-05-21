@@ -1,42 +1,60 @@
-# hermes-social — Design
+# shadownet — Design
 
 ## Purpose
 
-Generic agent-to-agent communication layer. Handles identity, transport,
+Agent-to-agent communication layer. Handles identity, transport,
 contact graph, permissions, message storage, and webhook notifications.
 Never interprets message content — the host agent owns all business logic.
 
 ## Architecture
 
-```
-Host Agent A                     Host Agent B
-    │                                 │
-    │  MCP (social_send, inbox, …)    │  MCP (social_send, inbox, …)
-    ▼                                 ▼
-┌──────────────┐   A2A HTTP+JSON  ┌──────────────┐
-│ hermes-social│ ◄──────────────► │ hermes-social│
-│  instance A  │                  │  instance B  │
-└──────────────┘                  └──────────────┘
-    │                                 │
-    ├─ Identity (Ed25519)             ├─ Identity (Ed25519)
-    ├─ Contact graph + grants         ├─ Contact graph + grants
-    ├─ Message store (SQLite)         ├─ Message store (SQLite)
-    └─ Webhook notifications          └─ Webhook notifications
+```mermaid
+graph LR
+    HA[Host Agent A] -->|MCP tools| HSA[shadownet A]
+    HB[Host Agent B] -->|MCP tools| HSB[shadownet B]
+    HSA ---|A2A HTTP JSON| HSB
+
+    HSA --- IdA[Identity, Contact Graph, Message Store, Webhook Notifications]
+
+    HSB --- IdB[Identity, Contact Graph, Message Store, Webhook Notifications]
 ```
 
 ## Message Flow
 
+```mermaid
+sequenceDiagram
+    participant HA as Host Agent
+    participant HS as shadownet
+    participant Remote as Remote shadownet
+
+    Note over HA,Remote: Outbound
+    HA->>HS: social_send
+    Note over HS: Build A2A message, store outbound interaction
+    HS->>Remote: POST /a2a/message send
+
+    Note over HA,Remote: Inbound
+    Remote->>HS: POST /a2a/message send
+    Note over HS: Verify JWT, check grant, store inbound interaction
+    HS->>HA: Webhook notification
+    HS-->>Remote: 200 OK ack
+
+    Note over HA,Remote: Response
+    HA->>HS: social_respond
+    Note over HS: Update interaction, build A2A response
+    HS->>Remote: POST /a2a/message send
+```
+
 1. **Outbound**: Host agent calls `social_send(contact_id, content, data_type)`.
-   hermes-social builds an A2A message, stores it as an outbound interaction,
+   shadownet builds an A2A message, stores it as an outbound interaction,
    and POSTs it to the remote agent's endpoint.
 
-2. **Inbound**: Remote agent POSTs to `/a2a/message:send`. hermes-social
+2. **Inbound**: Remote agent POSTs to `/a2a/message:send`. shadownet
    authenticates via JWT, checks the contact's grant, stores the message
    as an inbound interaction, fires a webhook notification to the host agent,
    and returns an ack.
 
 3. **Response**: Host agent calls `social_respond(interaction_id, content, data_type)`.
-   hermes-social updates the interaction, builds an A2A response, and sends it
+   shadownet updates the interaction, builds an A2A response, and sends it
    to the original sender.
 
 ## Data Model
@@ -73,7 +91,7 @@ message types however it wants.
 
 ## Webhook Notifications
 
-When `HERMES_SOCIAL_NOTIFICATION_WEBHOOK_URL` is configured, hermes-social
+When `SHADOWNET_NOTIFICATION_WEBHOOK_URL` is configured, shadownet
 POSTs structured JSON events to the host agent:
 
 - `message_received` — new inbound message (requires_action: true)
