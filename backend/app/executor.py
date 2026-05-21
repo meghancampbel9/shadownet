@@ -80,7 +80,9 @@ def build_envelope(
     """
     envelope_data: dict[str, Any] = {
         "shadownet:v": "0.1",
-        "intentId": f"urn:uuid:{intent_id or uuid.uuid4()}",
+        "intentId": intent_id
+        if intent_id and intent_id.startswith("urn:uuid:")
+        else f"urn:uuid:{intent_id or uuid.uuid4()}",
         "payload": payload,
     }
     if interaction:
