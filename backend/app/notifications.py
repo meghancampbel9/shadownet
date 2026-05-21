@@ -139,6 +139,9 @@ async def notify_message_received(
         "interaction_id": interaction_id,
         "data": data,
     }
+    from app.inbox_stream import publish as publish_inbox_event
+
+    publish_inbox_event(payload)
     await _post_webhook(payload, url_override=url)
 
 

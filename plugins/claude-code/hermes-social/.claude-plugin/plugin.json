@@ -1,0 +1,8 @@
+{
+  "name": "hermes-social",
+  "description": "Agent-to-agent messaging via the hermes-social sidecar. Adds the social_* MCP tools, packaged skills for messaging and coordination, and a monitor that streams new inbound messages into the session.",
+  "version": "0.1.0",
+  "author": {
+    "name": "hermes-social"
+  }
+}

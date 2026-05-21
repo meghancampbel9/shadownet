@@ -1,0 +1,7 @@
+[
+  {
+    "name": "hermes-inbox",
+    "command": "curl -sN \"${HERMES_SOCIAL_URL:-http://localhost:8340}/v1/inbox/stream\"",
+    "description": "Streams new inbound A2A messages from hermes-social as SSE events. Requires the /v1/inbox/stream endpoint on the backend (not yet implemented)."
+  }
+]

@@ -1,0 +1,4 @@
+name: hermes-social
+version: 0.1.0
+description: Bundles the hermes-social messaging and coordination skills. The MCP tools are configured separately in ~/.hermes/config.yaml under mcp_servers.
+author: hermes-social

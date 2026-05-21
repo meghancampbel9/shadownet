@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "hermes-social": {
+      "type": "http",
+      "url": "${HERMES_SOCIAL_MCP_URL:-http://localhost:8341/mcp}"
+    }
+  }
+}

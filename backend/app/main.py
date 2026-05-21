@@ -47,6 +47,7 @@ app.add_middleware(
 
 # ── Routers ────────────────────────────────────────────────────────────────
 
+from app.inbox_stream import router as inbox_stream_router  # noqa: E402
 from app.routers.a2a import router as a2a_router  # noqa: E402
 from app.routers.auth import router as auth_router  # noqa: E402
 from app.routers.contacts import router as contacts_router  # noqa: E402
@@ -58,6 +59,7 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(contacts_router, prefix="/api")
 app.include_router(interactions_router, prefix="/api")
 app.include_router(messages_router, prefix="/api")
+app.include_router(inbox_stream_router)
 
 # ── Health ─────────────────────────────────────────────────────────────────
 
