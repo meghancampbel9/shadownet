@@ -44,7 +44,7 @@ export function ContactDetailPage() {
           </div>
           {contact.did ? (
             <p className="text-[10px] text-muted font-mono truncate flex items-center gap-1 mt-0.5">
-              <Fingerprint size={10} className="text-green-400 shrink-0" />
+              <Fingerprint size={10} className="text-purple-400 shrink-0" />
               {contact.did}
             </p>
           ) : (
@@ -60,7 +60,7 @@ export function ContactDetailPage() {
           <h2 className="text-xs uppercase tracking-widest text-muted">Identity</h2>
           <div className="bg-surface-1 border border-border rounded p-4 space-y-3 text-sm">
             {contact.did && (
-              <Row icon={<Fingerprint size={12} className="text-green-400" />} label="DID" value={contact.did} mono />
+              <Row icon={<Fingerprint size={12} className="text-purple-400" />} label="DID" value={contact.did} mono />
             )}
             {contact.shadowname && (
               <Row icon={<AtSign size={12} className="text-accent" />} label="Shadowname" value={contact.shadowname} />

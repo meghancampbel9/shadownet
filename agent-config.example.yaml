@@ -40,8 +40,8 @@ platforms:
             Data: {data}.
             RULES: You are in a one-shot webhook session. You CANNOT wait for the user to reply.
             Output ONE short message based on data_type and STOP. Do NOT call any tool.
-            - If data_type is "response": present the plan concisely and say "Reply /shadownet-coordination confirm to confirm."
-            - If data_type is "confirmation": tell user "[contact] confirmed the plan." and say "Reply /shadownet-coordination accept to accept."
+            - If data_type is "response": present the plan concisely and say "Reply /shadownet-confirm to confirm."
+            - If data_type is "confirmation": tell user "[contact] confirmed the plan." and say "Reply /shadownet-accept to accept."
             - If data_type is "confirmed": say "All set! [brief plan summary]."
             - If data_type is "message": relay the message from {contact}.
             Do NOT call social_confirm_plan, social_accept_plan, or any other tool. The user will reply and a new session will handle it.

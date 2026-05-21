@@ -82,7 +82,7 @@ export function ContactsPage() {
                 <div className="flex items-center gap-2">
                   {c.did ? (
                     <p className="text-[10px] text-muted truncate flex items-center gap-1">
-                      <Fingerprint size={9} className="text-green-400 shrink-0" />
+                      <Fingerprint size={9} className="text-purple-400 shrink-0" />
                       <span className="font-mono">{c.did.slice(0, 20)}...{c.did.slice(-8)}</span>
                     </p>
                   ) : (
