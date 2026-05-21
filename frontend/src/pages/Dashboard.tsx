@@ -36,7 +36,7 @@ export function DashboardPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <p className="text-sm text-fg truncate">{c.name}</p>
-                      {c.did && <Fingerprint size={10} className="text-green-400 shrink-0" />}
+                      {c.did && <Fingerprint size={10} className="text-purple-400 shrink-0" />}
                     </div>
                     {c.shadowname ? (
                       <p className="text-[10px] text-accent/80 font-mono">@{c.shadowname}</p>
