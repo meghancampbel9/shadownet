@@ -79,9 +79,12 @@ class TestWebhookPayload:
         contact.name = "Test Friend"
         contact.id = "contact-123"
 
-        with patch("app.notifications.settings") as mock_settings, \
-             patch("app.notifications._post_webhook_with_retry",
-                   new_callable=AsyncMock) as mock_post:
+        with (
+            patch("app.notifications.settings") as mock_settings,
+            patch(
+                "app.notifications._post_webhook_with_retry", new_callable=AsyncMock
+            ) as mock_post,
+        ):
             mock_settings.notification_webhook_url = "http://agent:8644/webhooks/a2a-inbox"
             mock_settings.notification_negotiate_url = ""
             mock_settings.notification_webhook_secret = "secret"
@@ -112,9 +115,12 @@ class TestWebhookPayload:
         contact.name = "Test Friend"
         contact.id = "contact-123"
 
-        with patch("app.notifications.settings") as mock_settings, \
-             patch("app.notifications._post_webhook_with_retry",
-                   new_callable=AsyncMock) as mock_post:
+        with (
+            patch("app.notifications.settings") as mock_settings,
+            patch(
+                "app.notifications._post_webhook_with_retry", new_callable=AsyncMock
+            ) as mock_post,
+        ):
             mock_settings.notification_webhook_url = "http://agent:8644/webhooks/a2a-inbox"
             mock_settings.notification_negotiate_url = "http://agent:8644/webhooks/a2a-negotiate"
             mock_settings.notification_webhook_secret = "secret"
@@ -139,9 +145,12 @@ class TestWebhookPayload:
         contact.name = "Test Friend"
         contact.id = "contact-123"
 
-        with patch("app.notifications.settings") as mock_settings, \
-             patch("app.notifications._post_webhook_with_retry",
-                   new_callable=AsyncMock) as mock_post:
+        with (
+            patch("app.notifications.settings") as mock_settings,
+            patch(
+                "app.notifications._post_webhook_with_retry", new_callable=AsyncMock
+            ) as mock_post,
+        ):
             mock_settings.notification_webhook_url = "http://agent:8644/webhooks/a2a-inbox"
             mock_settings.notification_negotiate_url = "http://agent:8644/webhooks/a2a-negotiate"
             mock_settings.notification_webhook_secret = "secret"
@@ -166,9 +175,12 @@ class TestWebhookPayload:
         contact.name = "Test Friend"
         contact.id = "contact-123"
 
-        with patch("app.notifications.settings") as mock_settings, \
-             patch("app.notifications._post_webhook_with_retry",
-                   new_callable=AsyncMock) as mock_post:
+        with (
+            patch("app.notifications.settings") as mock_settings,
+            patch(
+                "app.notifications._post_webhook_with_retry", new_callable=AsyncMock
+            ) as mock_post,
+        ):
             mock_settings.notification_webhook_url = "http://agent:8644/webhooks/a2a-inbox"
             mock_settings.notification_negotiate_url = ""
             mock_settings.notification_webhook_secret = "secret"
@@ -189,9 +201,12 @@ class TestWebhookPayload:
         contact.name = "Alice"
         contact.id = "c-1"
 
-        with patch("app.notifications.settings") as mock_settings, \
-             patch("app.notifications._post_webhook_with_retry",
-                   new_callable=AsyncMock) as mock_post:
+        with (
+            patch("app.notifications.settings") as mock_settings,
+            patch(
+                "app.notifications._post_webhook_with_retry", new_callable=AsyncMock
+            ) as mock_post,
+        ):
             mock_settings.notification_webhook_url = "http://agent:8644/webhooks/test"
             mock_settings.notification_webhook_secret = "s"
 
@@ -240,12 +255,13 @@ class TestVerifyInbound:
 
         mock_ctx = HandshakeContext(caller_did=caller_did, presentation=None)
 
-        with patch("app.signing.get_did", return_value=my_did), \
-             patch("app.signing.get_resolver"), \
-             patch("app.signing.get_trust_store"), \
-             patch("app.database.engine", db_session.get_bind()), \
-             patch("app.signing.verify_handshake", new_callable=AsyncMock, return_value=mock_ctx):
-
+        with (
+            patch("app.signing.get_did", return_value=my_did),
+            patch("app.signing.get_resolver"),
+            patch("app.signing.get_trust_store"),
+            patch("app.database.engine", db_session.get_bind()),
+            patch("app.signing.verify_handshake", new_callable=AsyncMock, return_value=mock_ctx),
+        ):
             from app.signing import verify_inbound
 
             ctx = await verify_inbound(headers)
@@ -277,13 +293,17 @@ class TestVerifyInbound:
             audience_did=my_did,
         )
 
-        with patch("app.signing.get_did", return_value=my_did), \
-             patch("app.signing.get_resolver"), \
-             patch("app.signing.get_trust_store"), \
-             patch("app.database.engine", db_session.get_bind()), \
-             patch("app.signing.verify_handshake", new_callable=AsyncMock,
-                   side_effect=PresentationRequiredError(nonce="test-nonce")):
-
+        with (
+            patch("app.signing.get_did", return_value=my_did),
+            patch("app.signing.get_resolver"),
+            patch("app.signing.get_trust_store"),
+            patch("app.database.engine", db_session.get_bind()),
+            patch(
+                "app.signing.verify_handshake",
+                new_callable=AsyncMock,
+                side_effect=PresentationRequiredError(nonce="test-nonce"),
+            ),
+        ):
             from app.signing import verify_inbound
 
             with pytest.raises(PresentationRequiredError):
@@ -447,15 +467,17 @@ class TestExtractDataPart:
 
         body = {
             "message": {
-                "parts": [{
-                    "type": ENVELOPE_PART_TYPE,
-                    "mediaType": "application/json",
-                    "data": {
-                        "shadownet:v": "0.1",
-                        "intentId": "urn:uuid:abc",
-                        "payload": {"type": "coordination_request", "activity": "coffee"},
-                    },
-                }]
+                "parts": [
+                    {
+                        "type": ENVELOPE_PART_TYPE,
+                        "mediaType": "application/json",
+                        "data": {
+                            "shadownet:v": "0.1",
+                            "intentId": "urn:uuid:abc",
+                            "payload": {"type": "coordination_request", "activity": "coffee"},
+                        },
+                    }
+                ]
             }
         }
         dtype, data, iid = extract_data_part(body)
@@ -469,8 +491,7 @@ class TestExtractDataPart:
         body = {
             "message": {
                 "parts": [
-                    {"data": {"type": "message", "text": "hi"},
-                     "mediaType": "application/json"}
+                    {"data": {"type": "message", "text": "hi"}, "mediaType": "application/json"}
                 ]
             }
         }
@@ -567,8 +588,10 @@ class TestOutboundTransport:
         """C3: Empty peer_did should not attempt handshake headers."""
         from app.executor import send_a2a_message
 
-        with patch("app.executor.httpx.AsyncClient") as MockClient, \
-             patch("app.executor._get_outbound_headers") as mock_headers:
+        with (
+            patch("app.executor.httpx.AsyncClient") as MockClient,
+            patch("app.executor._get_outbound_headers") as mock_headers,
+        ):
             mock_client = AsyncMock()
             mock_resp = MagicMock()
             mock_resp.status_code = 200
@@ -588,9 +611,12 @@ class TestOutboundTransport:
         """Handshake headers should be added when peer_did is provided."""
         from app.executor import send_a2a_message
 
-        with patch("app.executor.httpx.AsyncClient") as MockClient, \
-             patch("app.executor._get_outbound_headers",
-                   return_value={"Authorization": "Bearer tok"}):
+        with (
+            patch("app.executor.httpx.AsyncClient") as MockClient,
+            patch(
+                "app.executor._get_outbound_headers", return_value={"Authorization": "Bearer tok"}
+            ),
+        ):
             mock_client = AsyncMock()
             mock_resp = MagicMock()
             mock_resp.status_code = 200

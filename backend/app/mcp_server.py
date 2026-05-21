@@ -43,7 +43,11 @@ def _validate_webhook_url(url: str) -> str | None:
         return None
     if url.startswith("https://"):
         return None
-    if url.startswith("http://localhost") or url.startswith("http://127.0.0.1") or url.startswith("http://[::1]"):
+    if (
+        url.startswith("http://localhost")
+        or url.startswith("http://127.0.0.1")
+        or url.startswith("http://[::1]")
+    ):
         return None
     return "invalid_webhook_url: must be https:// or http://localhost/127.0.0.1/[::1]"
 
@@ -51,9 +55,7 @@ def _validate_webhook_url(url: str) -> str | None:
 def _persist_webhook(url: str, secret: str, events: list[str] | None) -> None:
     """Persist webhook config to disk for replay after restart."""
     _WEBHOOK_PERSIST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _WEBHOOK_PERSIST_PATH.write_text(
-        json.dumps({"url": url, "secret": secret, "events": events})
-    )
+    _WEBHOOK_PERSIST_PATH.write_text(json.dumps({"url": url, "secret": secret, "events": events}))
 
 
 def load_persisted_webhook() -> None:
@@ -105,9 +107,7 @@ def social_contact_detail(id: str) -> str:
         contact = session.get(Contact, id)
         if contact is None:
             return json.dumps({"error": "Contact not found"})
-        grants = session.exec(
-            select(AccessGrant).where(AccessGrant.contact_id == id)
-        ).all()
+        grants = session.exec(select(AccessGrant).where(AccessGrant.contact_id == id)).all()
         grant_list = [g.grant_type for g in grants if g.allowed]
         return json.dumps(
             {
@@ -211,10 +211,12 @@ async def social_add_contact(
         except Exception as exc:
             return json.dumps({"error": f"SNS resolution failed: {exc}", "shadowname": shadowname})
     else:
-        return json.dumps({
-            "error": "SNS not configured — cannot resolve shadowname",
-            "shadowname": shadowname,
-        })
+        return json.dumps(
+            {
+                "error": "SNS not configured — cannot resolve shadowname",
+                "shadowname": shadowname,
+            }
+        )
 
     local_part = shadowname.split("@")[0] if "@" in shadowname else shadowname
     name = displayName or local_part
@@ -327,10 +329,26 @@ def social_set_webhook(url: str, secret: str, events: str = "[]") -> str:
 
 _COORDINATION_KEYWORDS = frozenset(
     {
-        "meeting", "meetup", "meet", "coffee", "lunch", "dinner", "drinks",
-        "hangout", "hang_out", "get_together", "catch_up", "brunch",
-        "coordination", "coordinate", "schedule", "planning", "plan",
-        "proposal", "invite", "invitation",
+        "meeting",
+        "meetup",
+        "meet",
+        "coffee",
+        "lunch",
+        "dinner",
+        "drinks",
+        "hangout",
+        "hang_out",
+        "get_together",
+        "catch_up",
+        "brunch",
+        "coordination",
+        "coordinate",
+        "schedule",
+        "planning",
+        "plan",
+        "proposal",
+        "invite",
+        "invitation",
     }
 )
 
@@ -347,8 +365,13 @@ def _normalize_data_type(data_type: str, content_payload: dict) -> str:
     content_str = json.dumps(content_payload).lower()
     for kw in ("meeting", "coffee", "lunch", "dinner", "drinks", "brunch", "meetup"):
         action_words = (
-            "propose", "plan", "schedule", "invite", "coordinate",
-            "want to meet", "get together",
+            "propose",
+            "plan",
+            "schedule",
+            "invite",
+            "coordinate",
+            "want to meet",
+            "get together",
         )
         if kw in content_str and any(w in content_str for w in action_words):
             logger.info(

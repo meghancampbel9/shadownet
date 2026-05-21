@@ -164,14 +164,16 @@ async def notify_message_received(
     try:
         from app.inbox_stream import publish as publish_inbox_event
 
-        publish_inbox_event({
-            "event": "message_received",
-            "requires_action": data_type not in _AGENT_ONLY_DATA_TYPES,
-            "contact": contact_name,
-            "data_type": data_type,
-            "interaction_id": interaction_id,
-            "data": data,
-        })
+        publish_inbox_event(
+            {
+                "event": "message_received",
+                "requires_action": data_type not in _AGENT_ONLY_DATA_TYPES,
+                "contact": contact_name,
+                "data_type": data_type,
+                "interaction_id": interaction_id,
+                "data": data,
+            }
+        )
     except ImportError:
         pass
 
@@ -190,9 +192,7 @@ async def notify_message_received(
     asyncio.create_task(_post_webhook_with_retry(webhook_payload, url))
 
 
-async def notify_interaction_updated(
-    contact: Any, interaction_id: str, status: str
-) -> None:
+async def notify_interaction_updated(contact: Any, interaction_id: str, status: str) -> None:
     url = settings.notification_webhook_url
     if not url:
         return

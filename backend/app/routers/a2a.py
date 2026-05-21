@@ -137,9 +137,7 @@ async def a2a_get_task(task_id: str, request: Request, session: Session = Depend
 
 
 @router.post("/a2a/tasks/{task_id}:cancel")
-async def a2a_cancel_task(
-    task_id: str, request: Request, session: Session = Depends(get_session)
-):
+async def a2a_cancel_task(task_id: str, request: Request, session: Session = Depends(get_session)):
     contact, _ = await _authenticate_sender(request, session)
 
     ictx = session.get(InteractionContext, task_id)

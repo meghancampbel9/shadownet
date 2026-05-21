@@ -156,7 +156,7 @@ uv run uvicorn app.mcp_run:app --host 0.0.0.0 --port 8341
 cd frontend && npm ci && npm run dev
 
 # Lint (must pass before push — CI enforces this)
-cd backend && uv run ruff check .
+cd backend && uv run ruff check . && uv run ruff format --check .
 
 # Tests
 cd backend && uv run pytest tests/

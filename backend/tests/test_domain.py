@@ -165,9 +165,7 @@ class TestA2AHelpers:
     def test_build_envelope_with_interaction(self):
         from app.executor import build_envelope
 
-        env = build_envelope(
-            {"type": "test"}, interaction="urn:shadownet:interaction:abc"
-        )
+        env = build_envelope({"type": "test"}, interaction="urn:shadownet:interaction:abc")
         data = env["message"]["parts"][0]["data"]
         assert data["interaction"] == "urn:shadownet:interaction:abc"
 

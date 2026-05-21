@@ -91,9 +91,7 @@ def get_agent_card() -> dict:
                 "httpAuthSecurityScheme": {
                     "scheme": "Bearer",
                     "bearerFormat": "JWT (EdDSA / Ed25519)",
-                    "description": (
-                        "DID-bound session token + Verifiable Presentation handshake."
-                    ),
+                    "description": ("DID-bound session token + Verifiable Presentation handshake."),
                 },
             },
         },
