@@ -1,124 +1,173 @@
-# shadownet — Design
+# Design
 
 ## Purpose
 
-Agent-to-agent communication layer. Handles identity, transport,
-contact graph, permissions, message storage, and webhook notifications.
-Never interprets message content — the host agent owns all business logic.
+Agent-to-agent communication sidecar implementing the Shadownet v0.1 protocol.
+Handles identity, transport, contacts, permissions, message storage, and webhook
+notifications. Never interprets message content — the host agent owns all
+business logic.
 
 ## Architecture
 
-```mermaid
-graph LR
-    HA[Host Agent A] -->|MCP tools| HSA[shadownet A]
-    HB[Host Agent B] -->|MCP tools| HSB[shadownet B]
-    HSA ---|A2A HTTP JSON| HSB
-
-    HSA --- IdA[Identity, Contact Graph, Message Store, Webhook Notifications]
-
-    HSB --- IdB[Identity, Contact Graph, Message Store, Webhook Notifications]
+```
+Host Agent ──MCP──► shadownet-local ──A2A HTTP──► Remote shadownet-local
+                         │
+                    ┌────┴────┐
+                    │ SQLite  │
+                    │ Ed25519 │
+                    │ Webhook │
+                    └─────────┘
 ```
 
-## Message Flow
-
-```mermaid
-sequenceDiagram
-    participant HA as Host Agent
-    participant HS as shadownet
-    participant Remote as Remote shadownet
-
-    Note over HA,Remote: Outbound
-    HA->>HS: social_send
-    Note over HS: Build A2A message, store outbound interaction
-    HS->>Remote: POST /a2a/message send
-
-    Note over HA,Remote: Inbound
-    Remote->>HS: POST /a2a/message send
-    Note over HS: Verify JWT, check grant, store inbound interaction
-    HS->>HA: Webhook notification
-    HS-->>Remote: 200 OK ack
-
-    Note over HA,Remote: Response
-    HA->>HS: social_respond
-    Note over HS: Update interaction, build A2A response
-    HS->>Remote: POST /a2a/message send
-```
-
-1. **Outbound**: Host agent calls `social_send(contact_id, content, data_type)`.
-   shadownet builds an A2A message, stores it as an outbound interaction,
-   and POSTs it to the remote agent's endpoint.
-
-2. **Inbound**: Remote agent POSTs to `/a2a/message:send`. shadownet
-   authenticates via JWT, checks the contact's grant, stores the message
-   as an inbound interaction, fires a webhook notification to the host agent,
-   and returns an ack.
-
-3. **Response**: Host agent calls `social_respond(interaction_id, content, data_type)`.
-   shadownet updates the interaction, builds an A2A response, and sends it
-   to the original sender.
-
-## Data Model
-
-- **User** — operator account for the management UI
-- **Contact** — a known remote agent (name, endpoint, public key, label, metadata)
-- **AccessGrant** — per-contact permission (single `messaging` grant: allow/deny)
-- **InteractionContext** — every message (inbound/outbound), with data_type,
-  status, direction, and a JSON context_data blob
+Each instance manages:
+- **Identity** — Ed25519 keypair → DID:key → agent card at `/.well-known/agent-card.json`
+- **Contact graph** — known peers with DID, endpoint, public key, grants
+- **Message store** — every inbound/outbound interaction persisted
+- **Webhook dispatch** — notifies host agent on inbound messages
 
 ## Authentication
 
-- Ed25519 keypair generated on first startup
-- Outbound: JWT signed with local private key, `sub` = own external URL
-- Inbound: JWT verified against the sender's stored public key
+### Identity
+
+On first startup, the sidecar generates an Ed25519 keypair and derives a
+`did:key` identifier. The public key and DID are published in the agent card.
+
+### Inbound (verifying senders)
+
+Uses `shadownet.a2a.server.verify_handshake` from the SDK:
+1. Extracts the sender's DID from the `Authorization` header (JWT `sub` claim)
+2. Checks if the DID is in a **trusted cache** (built from known contacts)
+3. Known DIDs are accepted without a Verifiable Presentation
+4. Unknown DIDs are rejected with `401 Unauthorized`
+
+This trust model is intentional for pre-SCA deployments. Once a Shadow
+Certification Authority exists, full VP-based verification will be enforced.
+
+### Outbound (proving identity)
+
+Uses `shadownet.a2a.client.build_handshake_headers` from the SDK:
+- Signs a JWT with the local private key
+- Sets `audience` to the peer's DID
+- Includes `A2A-Version` header
+
+## Message Flow
+
+```
+Outbound:
+  Host Agent → social_send/social_respond/social_coordinate
+    → build_envelope (shadownet/v1+envelope)
+    → wrap in A2A message structure
+    → POST to peer's /a2a/message:send
+    → store as outbound InteractionContext
+
+Inbound:
+  Remote → POST /a2a/message:send
+    → verify_inbound (SDK handshake check)
+    → check grant (messaging permission)
+    → extract envelope → store as inbound InteractionContext
+    → fire webhook notification to host agent
+    → return 200 OK
+```
+
+### Webhook Routing
+
+Inbound messages are routed to different webhook endpoints based on `data_type`:
+
+| data_type | Target | Reason |
+|-----------|--------|--------|
+| `coordination_request` | `NOTIFICATION_NEGOTIATE_URL` | Agent handles silently (autonomous negotiation) |
+| All others | `NOTIFICATION_WEBHOOK_URL` | Delivered to user's chat platform |
+
+Webhooks include HMAC-SHA256 signatures for verification.
+
+## Data Model
+
+| Model | Purpose |
+|-------|---------|
+| **User** | Operator account for the management UI |
+| **Contact** | Known remote agent (name, DID, endpoint, public key JWK, shadowname) |
+| **AccessGrant** | Per-contact permission (messaging: allow/deny) |
+| **InteractionContext** | Every message (data_type, direction, status, context_data JSON) |
+
+### InteractionContext Lifecycle
+
+| data_type | direction | status progression |
+|-----------|-----------|-------------------|
+| `coordination_request` | outbound | `sent` |
+| `coordination_request` | inbound | `received` → `responded` |
+| `response` | outbound | `sent` |
+| `response` | inbound | `received` → `responded` (on confirm) |
+| `confirmation` | outbound | `sent` |
+| `confirmation` | inbound | `received` |
 
 ## Grant System
 
-Binary allow/deny per contact. If a contact has an AccessGrant with
-`grant_type=messaging` and `allowed=True`, they can communicate. The
-transport layer does not filter by data_type — the host agent interprets
-message types however it wants.
-
-## MCP Tools
-
-| Tool | Description |
-|------|-------------|
-| `social_send` | Send a message to a contact (any data_type + payload) |
-| `social_inbox` | List recent inbound messages |
-| `social_respond` | Reply to an inbound message |
-| `social_contacts` | List contacts |
-| `social_contact_detail` | Get contact details |
-| `social_interactions` | List all interactions (filterable) |
-
-## Webhook Notifications
-
-When `SHADOWNET_NOTIFICATION_WEBHOOK_URL` is configured, shadownet
-POSTs structured JSON events to the host agent:
-
-- `message_received` — new inbound message (requires_action: true)
-- `interaction_updated` — status change on an interaction
-
-The host agent decides how to notify the user (Telegram, Slack, email, etc.).
+Binary allow/deny per contact. A contact with `grant_type=messaging` and
+`allowed=True` can communicate. The transport layer does not filter by
+`data_type` — the host agent interprets message types.
 
 ## File Layout
 
 ```
 backend/app/
-├── main.py              FastAPI application
-├── config.py            Settings (env-based)
-├── database.py          SQLite engine + session
+├── main.py              FastAPI application + lifespan
+├── config.py            Settings (SHADOWNET_ env prefix)
+├── database.py          SQLite engine (WAL mode)
 ├── models.py            User, Contact, AccessGrant, InteractionContext
-├── executor.py          A2A protocol helpers + inbound handler
-├── grants.py            Grant enforcement
-├── identity.py          Ed25519 keypair + agent card
-├── signing.py           JWT signing/verification
-├── notifications.py     Webhook + push notifications
-├── deps.py              Auth dependencies
-├── mcp_server.py        MCP tool definitions
-├── mcp_run.py           MCP standalone runner
+├── executor.py          A2A envelope building + message dispatch
+├── grants.py            Grant enforcement + contact lookup by DID
+├── identity.py          Ed25519 keypair + DID:key derivation + agent card
+├── signing.py           SDK handshake init, verify_inbound, outbound headers
+├── notifications.py     Webhook dispatch with routing + HMAC signing
+├── deps.py              Auth dependencies (UI sessions)
+├── mcp_server.py        MCP tool definitions (social_* tools)
+├── mcp_run.py           MCP standalone HTTP runner
 └── routers/
-    ├── a2a.py           A2A HTTP endpoints
+    ├── a2a.py           /a2a/message:send endpoint
     ├── auth.py          User auth (register/login)
-    ├── contacts.py      Contact CRUD
-    ├── interactions.py  Interaction list/detail
-    └── messages.py      Message history
+    ├── contacts.py      Contact CRUD API
+    ├── interactions.py  Interaction list/detail API
+    └── messages.py      Message history API
+
+skills/social/
+├── shadownet/SKILL.md               Base messaging skill
+└── shadownet-coordination/SKILL.md  Coordination flow skill
+
+frontend/                React + Vite management UI
 ```
+
+## Envelope Format
+
+Messages use the `shadownet/v1+envelope` format wrapped in a standard A2A
+message structure:
+
+```json
+{
+  "message": {
+    "role": "ROLE_AGENT",
+    "parts": [{
+      "type": "data",
+      "data": {
+        "type": "shadownet/v1+envelope",
+        "sender": "did:key:z6Mk...",
+        "recipient": "did:key:z6Mk...",
+        "interaction": "uuid",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "payload": {
+          "type": "coordination_request",
+          "activity": "coffee",
+          "details": "Friday morning"
+        }
+      }
+    }]
+  }
+}
+```
+
+## Dependencies
+
+- `shadownet[fastapi]>=0.3.0` — Protocol SDK (DID, handshake, SNS, trust)
+- FastAPI + uvicorn — HTTP server
+- SQLModel — ORM (SQLAlchemy + Pydantic)
+- httpx — Async HTTP client
+- cryptography — Ed25519 key management

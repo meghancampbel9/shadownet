@@ -39,6 +39,7 @@ def contact(db_session):
         name="Alice",
         agent_endpoint="http://alice:8340",
         agent_public_key="AAAA",
+        did="did:key:z6MkTestAlice",
         label="friend",
     )
     db_session.add(c)
@@ -52,7 +53,7 @@ def client(db_session):
     from contextlib import asynccontextmanager
 
     from fastapi.testclient import TestClient
-    from nacl.signing import SigningKey
+    from shadownet.crypto.ed25519 import Ed25519KeyPair
 
     from app import identity as identity_module
     from app.database import get_session
@@ -60,12 +61,10 @@ def client(db_session):
 
     @asynccontextmanager
     async def test_lifespan(_app):
-        key = SigningKey.generate()
-        identity_module._signing_key = key
-        identity_module._verify_key = key.verify_key
+        keypair = Ed25519KeyPair.generate()
+        identity_module._keypair = keypair
         yield
-        identity_module._signing_key = None
-        identity_module._verify_key = None
+        identity_module._keypair = None
 
     def override_session():
         yield db_session

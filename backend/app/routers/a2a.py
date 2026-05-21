@@ -1,7 +1,7 @@
 """A2A protocol HTTP+JSON/REST endpoints.
 
-Thin routing layer: authentication, grant check, then store + ack via the
-generic handle_inbound function. No domain logic.
+Thin routing layer: authentication via RFC-0006 handshake, grant check,
+then store + ack via the generic handle_inbound function. No domain logic.
 """
 
 from __future__ import annotations
@@ -11,15 +11,19 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from shadownet.a2a.errors import (
+    LevelInsufficientError,
+    PresentationInvalidError,
+    PresentationRequiredError,
+)
 from sqlmodel import Session, select
 
 from app.database import get_session
 from app.executor import extract_data_part, handle_inbound, task_response
-from app.grants import GrantDenied, find_contact_by_endpoint
+from app.grants import GrantDenied, enforce_grant, find_contact_by_did, find_contact_by_endpoint
 from app.identity import get_agent_card
 from app.models import InteractionContext
-from app.notifications import register_push_config
-from app.signing import verify_a2a_jwt
+from app.signing import verify_inbound
 
 logger = logging.getLogger(__name__)
 
@@ -37,50 +41,42 @@ def agent_card():
 # ── Authentication ─────────────────────────────────────────────────────────
 
 
-def _authenticate_sender(request: Request, session: Session):
-    auth_header = request.headers.get("authorization", "")
-    if not auth_header.lower().startswith("bearer "):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing Bearer token")
-
-    token = auth_header[7:]
-
-    import jwt as _jwt
+async def _authenticate_sender(request: Request, session: Session):
+    headers = dict(request.headers.items())
 
     try:
-        unverified = _jwt.decode(token, options={"verify_signature": False})
-    except Exception:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Malformed JWT")
-
-    sender_url = unverified.get("sub", "")
-    if not sender_url:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "JWT missing 'sub' claim")
-
-    contact = find_contact_by_endpoint(session, sender_url)
-    if contact is None:
+        ctx = await verify_inbound(headers)
+    except PresentationRequiredError as exc:
         raise HTTPException(
-            status.HTTP_403_FORBIDDEN, {"error": "unknown_agent", "sender": sender_url}
+            status.HTTP_401_UNAUTHORIZED,
+            {
+                "error": "presentation_required",
+                "nonce": exc.nonce,
+                "shadownet:v": "0.1",
+            },
+        )
+    except PresentationInvalidError as exc:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            {"error": "presentation_invalid", "detail": str(exc), "shadownet:v": "0.1"},
+        )
+    except LevelInsufficientError as exc:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            {"error": "level_insufficient", "detail": str(exc), "shadownet:v": "0.1"},
         )
 
-    pub_key = contact.agent_public_key
-    sender_pub = unverified.get("pub", "")
-    if not pub_key:
-        if sender_pub:
-            contact.agent_public_key = sender_pub
-            session.add(contact)
-            session.commit()
-            pub_key = sender_pub
-            logger.info("Auto-populated public key for contact %s", contact.name)
-        else:
-            raise HTTPException(
-                status.HTTP_401_UNAUTHORIZED,
-                "Contact has no public key and JWT has no 'pub' claim",
-            )
+    caller_did = ctx.caller_did
+    contact = find_contact_by_did(session, caller_did)
+    if contact is None:
+        contact = find_contact_by_endpoint(session, caller_did)
+    if contact is None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            {"error": "unknown_agent", "sender": caller_did, "shadownet:v": "0.1"},
+        )
 
-    claims = verify_a2a_jwt(token, pub_key)
-    if claims is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid JWT signature")
-
-    return contact, claims
+    return contact, ctx
 
 
 # ── A2A Message Send ────────────────────────────────────────────────────────
@@ -89,28 +85,25 @@ def _authenticate_sender(request: Request, session: Session):
 @router.post("/a2a/message:send")
 async def a2a_message_send(request: Request, session: Session = Depends(get_session)):
     body = await request.json()
-    contact, claims = _authenticate_sender(request, session)
-
-    from app.grants import enforce_grant
+    contact, ctx = await _authenticate_sender(request, session)
 
     try:
         enforce_grant(session, contact)
     except GrantDenied as exc:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            {
-                "error": "grant_denied",
-                "required_grant": exc.grant_type,
-            },
+            {"error": "grant_denied", "required_grant": exc.grant_type, "shadownet:v": "0.1"},
         )
 
-    data_type, data = extract_data_part(body)
+    data_type, data, intent_id = extract_data_part(body)
     message_obj = body.get("message", {})
     task_id = message_obj.get("taskId")
 
-    logger.info("A2A message:send from=%s type=%s taskId=%s", contact.name, data_type, task_id)
+    logger.info(
+        "A2A message:send from=%s (did=%s) type=%s", contact.name, ctx.caller_did, data_type
+    )
 
-    result = await handle_inbound(data_type, data, contact, task_id, session)
+    result = await handle_inbound(data_type, data, contact, task_id, session, intent_id=intent_id)
     return result
 
 
@@ -118,8 +111,8 @@ async def a2a_message_send(request: Request, session: Session = Depends(get_sess
 
 
 @router.get("/a2a/tasks/{task_id}")
-def a2a_get_task(task_id: str, request: Request, session: Session = Depends(get_session)):
-    contact, _ = _authenticate_sender(request, session)
+async def a2a_get_task(task_id: str, request: Request, session: Session = Depends(get_session)):
+    contact, _ = await _authenticate_sender(request, session)
 
     ictx = session.get(InteractionContext, task_id)
     if ictx is None:
@@ -144,8 +137,10 @@ def a2a_get_task(task_id: str, request: Request, session: Session = Depends(get_
 
 
 @router.post("/a2a/tasks/{task_id}:cancel")
-def a2a_cancel_task(task_id: str, request: Request, session: Session = Depends(get_session)):
-    contact, _ = _authenticate_sender(request, session)
+async def a2a_cancel_task(
+    task_id: str, request: Request, session: Session = Depends(get_session)
+):
+    contact, _ = await _authenticate_sender(request, session)
 
     ictx = session.get(InteractionContext, task_id)
     if ictx is None:
@@ -160,31 +155,6 @@ def a2a_cancel_task(task_id: str, request: Request, session: Session = Depends(g
     session.commit()
 
     return task_response(ictx.id, "TASK_STATE_CANCELED")
-
-
-# ── Push Notification Config ───────────────────────────────────────────────
-
-
-@router.post("/a2a/tasks/{task_id}/pushNotificationConfigs")
-async def a2a_create_push_config(
-    task_id: str, request: Request, session: Session = Depends(get_session)
-):
-    contact, _ = _authenticate_sender(request, session)
-
-    ictx = session.get(InteractionContext, task_id)
-    if ictx is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, {"error": "TaskNotFoundError"})
-
-    body = await request.json()
-    config = register_push_config(
-        task_id,
-        {
-            "url": body.get("url", ""),
-            "authentication": body.get("authentication"),
-            "contact_id": contact.id,
-        },
-    )
-    return config
 
 
 # ── Webhook (receiving push notifications from remote agents) ──────────────
@@ -226,8 +196,6 @@ async def a2a_webhook(request: Request, session: Session = Depends(get_session))
 
             contact = session.get(Contact, ictx.contact_id) if ictx.contact_id else None
             if contact:
-                # TODO: migrate to a proper task manager so notifications are truly fire-and-forget
-                # without blocking the webhook response.
                 await notify_interaction_updated(contact, ictx.id, ictx.status)
 
             logger.info("Webhook updated interaction %s to %s", ictx.id, ictx.status)

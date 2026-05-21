@@ -16,17 +16,6 @@ class GrantDenied(Exception):
         super().__init__(f"Grant '{grant_type}' not allowed for action '{action}'")
 
 
-class UnknownAgent(Exception):
-    def __init__(self, sender: str):
-        self.sender = sender
-        super().__init__(f"Unknown agent: {sender}")
-
-
-def identify_sender(session: Session, sender_public_key: str) -> Contact | None:
-    stmt = select(Contact).where(Contact.agent_public_key == sender_public_key)
-    return session.exec(stmt).first()
-
-
 def find_contact_by_endpoint(session: Session, endpoint: str) -> Contact | None:
     normalized = endpoint.rstrip("/")
     stmt = select(Contact).where(Contact.agent_endpoint == endpoint)
@@ -38,6 +27,13 @@ def find_contact_by_endpoint(session: Session, endpoint: str) -> Contact | None:
         stmt = select(Contact).where(Contact.agent_endpoint == normalized + "/")
         result = session.exec(stmt).first()
     return result
+
+
+def find_contact_by_did(session: Session, did: str) -> Contact | None:
+    if not did:
+        return None
+    stmt = select(Contact).where(Contact.did == did)
+    return session.exec(stmt).first()
 
 
 def enforce_grant(session: Session, contact: Contact) -> None:

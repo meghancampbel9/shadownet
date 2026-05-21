@@ -1,7 +1,7 @@
-"""MCP server exposing generic agent-to-agent communication tools.
+"""MCP server exposing shadownet-local protocol tools.
 
 Uses FastMCP for tool definitions and mounts into the FastAPI app
-via streamable_http_app().
+via streamable_http_app(). All tools follow RFC-0007 naming and schemas.
 """
 
 from __future__ import annotations
@@ -9,95 +9,323 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 from sqlmodel import Session, select
 
+from app.config import settings
 from app.database import engine
-from app.models import AccessGrant, Contact, InteractionContext, _utcnow
+from app.models import AccessGrant, Contact, GrantType, InteractionContext, _utcnow
 
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("shadownet", stateless_http=True)
+
+_inbox_event: asyncio.Event = asyncio.Event()
+
+_WEBHOOK_PERSIST_PATH = Path(settings.data_dir) / "webhook.json"
+
+
+def notify_inbox() -> None:
+    """Signal that a new inbox message has arrived (unblocks social_inbox_wait)."""
+    _inbox_event.set()
 
 
 def _get_session() -> Session:
     return Session(engine)
 
 
-# ── Tools ──────────────────────────────────────────────────────────────────
+def _validate_webhook_url(url: str) -> str | None:
+    """Return error string if URL violates RFC-0007 constraints, else None."""
+    if not url:
+        return None
+    if url.startswith("https://"):
+        return None
+    if url.startswith("http://localhost") or url.startswith("http://127.0.0.1") or url.startswith("http://[::1]"):
+        return None
+    return "invalid_webhook_url: must be https:// or http://localhost/127.0.0.1/[::1]"
+
+
+def _persist_webhook(url: str, secret: str, events: list[str] | None) -> None:
+    """Persist webhook config to disk for replay after restart."""
+    _WEBHOOK_PERSIST_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _WEBHOOK_PERSIST_PATH.write_text(
+        json.dumps({"url": url, "secret": secret, "events": events})
+    )
+
+
+def load_persisted_webhook() -> None:
+    """Restore webhook registration from disk at startup."""
+    if _WEBHOOK_PERSIST_PATH.exists():
+        try:
+            data = json.loads(_WEBHOOK_PERSIST_PATH.read_text())
+            settings.notification_webhook_url = data.get("url", "")
+            settings.notification_webhook_secret = data.get("secret", "")
+        except (json.JSONDecodeError, OSError):
+            pass
+
+
+# ── RFC-0007 Required Tools ────────────────────────────────────────────────
 
 
 @mcp.tool()
 def social_contacts(query: str = "") -> str:
     """List contacts in the user's agent network.
 
-    Returns the id, name, endpoint, and metadata for each contact.
-    Use the 'id' field when calling social_send() or other tools.
-    Optionally filter by name substring.
+    Returns contacts with id, shadowname, did, displayName, level, and lastSeen.
+    Optionally filter by name/shadowname substring.
     """
     with _get_session() as session:
         contacts = session.exec(select(Contact)).all()
         results = []
         for c in contacts:
-            if query and query.lower() not in c.name.lower():
+            if query and query.lower() not in c.name.lower() and query.lower() not in c.shadowname.lower():
                 continue
             results.append(
                 {
                     "id": c.id,
-                    "name": c.name,
-                    "agent_endpoint": c.agent_endpoint,
-                    "label": c.label,
-                    "metadata": json.loads(c.metadata_json),
+                    "shadowname": c.shadowname,
+                    "did": c.did,
+                    "displayName": c.name,
+                    "level": None,
+                    "lastSeen": None,
                 }
             )
-        return json.dumps(results, indent=2)
+        return json.dumps({"contacts": results}, indent=2)
 
 
 @mcp.tool()
-def social_contact_detail(contact_id: str) -> str:
-    """Get full details on a specific contact including their access grants."""
+def social_contact_detail(id: str) -> str:
+    """Get full details on a specific contact including grants and credentials."""
     with _get_session() as session:
-        contact = session.get(Contact, contact_id)
+        contact = session.get(Contact, id)
         if contact is None:
             return json.dumps({"error": "Contact not found"})
-        grants = session.exec(select(AccessGrant).where(AccessGrant.contact_id == contact_id)).all()
+        grants = session.exec(
+            select(AccessGrant).where(AccessGrant.contact_id == id)
+        ).all()
+        grant_list = [g.grant_type for g in grants if g.allowed]
         return json.dumps(
             {
                 "id": contact.id,
-                "name": contact.name,
-                "agent_endpoint": contact.agent_endpoint,
-                "label": contact.label,
-                "notes": contact.notes,
-                "metadata": json.loads(contact.metadata_json),
-                "grants": {g.grant_type: g.allowed for g in grants},
+                "shadowname": contact.shadowname,
+                "did": contact.did,
+                "endpoint": contact.agent_endpoint,
+                "publicKey": json.loads(contact.public_key_jwk),
+                "credentials": [],
+                "grants": grant_list,
+                "notes": contact.notes or None,
             },
             indent=2,
         )
 
 
+@mcp.tool()
+def social_identity() -> str:
+    """Return this sidecar's identity (DID, shadowname, public key, credentials)."""
+    from app.identity import get_did, get_keypair
+
+    return json.dumps(
+        {
+            "did": get_did(),
+            "shadowname": settings.shadowname or None,
+            "publicKey": get_keypair().public_jwk(),
+            "credentials": [],
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+async def social_resolve(shadowname: str) -> str:
+    """Resolve a shadowname to a DID and agent endpoint via SNS.
+
+    Does NOT add to the contact graph. Use social_add_contact to persist.
+
+    Args:
+        shadowname: The shadowname to resolve (e.g. "alice@provider.example").
+    """
+    from app.signing import get_sns_client
+
+    client = get_sns_client()
+    if client is None:
+        return json.dumps({"error": "SNS not configured", "shadowname": shadowname})
+
+    try:
+        record = await client.resolve(shadowname)
+        return json.dumps(
+            {
+                "did": record.did,
+                "endpoint": record.endpoint,
+                "publicKey": record.public_key.model_dump(),
+                "subjectType": record.subject_type,
+                "ttl": record.ttl,
+            },
+            indent=2,
+        )
+    except Exception as exc:
+        return json.dumps({"error": str(exc), "shadowname": shadowname})
+
+
+@mcp.tool()
+async def social_add_contact(
+    shadowname: str,
+    displayName: str = "",
+    grants: str = "[]",
+) -> str:
+    """Add a resolved entity to the contact graph.
+
+    Resolves the shadowname via SNS to get DID + endpoint, then creates
+    the contact. Pass grants as a JSON array of grant strings.
+
+    Args:
+        shadowname: The shadowname to add (e.g. "alice@provider.example").
+        displayName: Human-readable name (defaults to the shadowname's local part).
+        grants: JSON array of grant strings to auto-allow (default: ["messaging"]).
+    """
+    from app.signing import get_sns_client
+
+    try:
+        grant_list = json.loads(grants)
+    except (json.JSONDecodeError, TypeError):
+        grant_list = ["messaging"]
+
+    if not grant_list:
+        grant_list = ["messaging"]
+
+    did = ""
+    endpoint = ""
+    public_key_jwk = "{}"
+
+    client = get_sns_client()
+    if client is not None:
+        try:
+            record = await client.resolve(shadowname)
+            did = record.did
+            endpoint = record.endpoint
+            public_key_jwk = json.dumps(record.public_key.model_dump())
+        except Exception as exc:
+            return json.dumps({"error": f"SNS resolution failed: {exc}", "shadowname": shadowname})
+    else:
+        return json.dumps({"error": "SNS not configured — cannot resolve shadowname", "shadowname": shadowname})
+
+    local_part = shadowname.split("@")[0] if "@" in shadowname else shadowname
+    name = displayName or local_part
+
+    with _get_session() as session:
+        contact = Contact(
+            name=name,
+            agent_endpoint=endpoint,
+            did=did,
+            shadowname=shadowname,
+            public_key_jwk=public_key_jwk,
+        )
+        session.add(contact)
+
+        for g in grant_list:
+            grant = AccessGrant(
+                contact_id=contact.id,
+                grant_type=g,
+                allowed=True,
+            )
+            session.add(grant)
+
+        session.commit()
+        session.refresh(contact)
+
+        return json.dumps(
+            {
+                "id": contact.id,
+                "shadowname": contact.shadowname,
+                "did": contact.did,
+            },
+            indent=2,
+        )
+
+
+@mcp.tool()
+def social_grant(contactId: str, grant: str = "messaging", allowed: bool = True) -> str:
+    """Grant or revoke a per-contact permission.
+
+    Args:
+        contactId: The contact to update grants for.
+        grant: The grant type string (v0.1: "messaging").
+        allowed: Whether to allow (True) or revoke (False).
+    """
+    with _get_session() as session:
+        contact = session.get(Contact, contactId)
+        if contact is None:
+            return json.dumps({"error": "Contact not found"})
+
+        existing = session.exec(
+            select(AccessGrant)
+            .where(AccessGrant.contact_id == contactId)
+            .where(AccessGrant.grant_type == grant)
+        ).first()
+
+        if existing:
+            existing.allowed = allowed
+            existing.updated_at = _utcnow()
+            session.add(existing)
+        else:
+            new_grant = AccessGrant(
+                contact_id=contactId,
+                grant_type=grant,
+                allowed=allowed,
+            )
+            session.add(new_grant)
+
+        session.commit()
+        return json.dumps({"ok": True})
+
+
+@mcp.tool()
+def social_set_webhook(url: str, secret: str, events: str = "[]") -> str:
+    """Register or update the webhook for inbox notifications.
+
+    To unregister, call with url="".
+    Secret must be at least 32 characters.
+
+    Args:
+        url: The webhook URL (https:// or http://localhost only). Empty to unregister.
+        secret: HMAC secret for signature verification (>=32 bytes).
+        events: JSON array of event types to subscribe to (default: all events).
+    """
+    if url == "":
+        settings.notification_webhook_url = ""
+        settings.notification_webhook_secret = ""
+        _persist_webhook("", "", None)
+        return json.dumps({"ok": True})
+
+    url_err = _validate_webhook_url(url)
+    if url_err:
+        return json.dumps({"error": url_err})
+
+    if len(secret) < 32:
+        return json.dumps({"error": "secret must be at least 32 bytes"})
+
+    try:
+        event_list = json.loads(events) if events else None
+    except (json.JSONDecodeError, TypeError):
+        event_list = None
+
+    settings.notification_webhook_url = url
+    settings.notification_webhook_secret = secret
+    _persist_webhook(url, secret, event_list)
+
+    return json.dumps({"ok": True})
+
+
+# ── Messaging Tools ────────────────────────────────────────────────────────
+
 _COORDINATION_KEYWORDS = frozenset(
     {
-        "meeting",
-        "meetup",
-        "meet",
-        "coffee",
-        "lunch",
-        "dinner",
-        "drinks",
-        "hangout",
-        "hang_out",
-        "get_together",
-        "catch_up",
-        "brunch",
-        "coordination",
-        "coordinate",
-        "schedule",
-        "planning",
-        "plan",
-        "proposal",
-        "invite",
-        "invitation",
+        "meeting", "meetup", "meet", "coffee", "lunch", "dinner", "drinks",
+        "hangout", "hang_out", "get_together", "catch_up", "brunch",
+        "coordination", "coordinate", "schedule", "planning", "plan",
+        "proposal", "invite", "invitation",
     }
 )
 
@@ -114,13 +342,8 @@ def _normalize_data_type(data_type: str, content_payload: dict) -> str:
     content_str = json.dumps(content_payload).lower()
     for kw in ("meeting", "coffee", "lunch", "dinner", "drinks", "brunch", "meetup"):
         action_words = (
-            "propose",
-            "plan",
-            "schedule",
-            "invite",
-            "coordinate",
-            "want to meet",
-            "get together",
+            "propose", "plan", "schedule", "invite", "coordinate",
+            "want to meet", "get together",
         )
         if kw in content_str and any(w in content_str for w in action_words):
             logger.info(
@@ -158,55 +381,67 @@ def _enrich_confirmation(payload: dict, contact_id: str, session: Session) -> di
 
 
 @mcp.tool()
-def social_send(contact_id: str, content: str, data_type: str = "message") -> str:
-    """Send a message to another agent via the A2A protocol.
+def social_send(
+    contactId: str,
+    payload: str,
+    interaction: str = "",
+    intentId: str = "",
+) -> str:
+    """Send a Shadownet-enveloped message over A2A.
 
-    After sending, END your turn. Do NOT call social_inbox — a webhook
-    will notify you automatically when the other agent replies.
+    After sending, END your turn. A webhook or inbox_wait will notify you
+    when the other agent replies.
 
     Args:
-        contact_id: The contact to send to (get from social_contacts).
-        content: The message payload — a JSON string for structured data,
-                 or plain text for simple messages.
-        data_type: For meeting/coordination requests, use "coordination_request"
-                   (triggers autonomous agent-to-agent negotiation on the remote
-                   side — the other user is NOT notified until both agents agree).
-                   Other types: "message", "confirmation", "confirmed".
+        contactId: The contact to send to (from social_contacts).
+        payload: The message payload as a JSON object string.
+        interaction: Optional interaction URI (must start with urn:). Omit for free-form.
+        intentId: Optional existing intent ID. New intent created if absent.
     """
     with _get_session() as session:
-        contact = session.get(Contact, contact_id)
+        contact = session.get(Contact, contactId)
         if contact is None:
             return json.dumps({"error": "Contact not found"})
 
-        from app.executor import build_a2a_message, send_a2a_message
+        from app.executor import build_envelope, send_a2a_message
 
         try:
-            payload = json.loads(content)
+            payload_obj = json.loads(payload)
         except (json.JSONDecodeError, TypeError):
-            payload = {"text": content}
+            payload_obj = {"text": payload}
 
-        data_type = _normalize_data_type(data_type, payload)
+        data_type = payload_obj.get("type", "message")
+        data_type = _normalize_data_type(data_type, payload_obj)
 
         if data_type in ("confirmation", "confirmed"):
-            payload = _enrich_confirmation(payload, contact.id, session)
+            payload_obj = _enrich_confirmation(payload_obj, contact.id, session)
 
-        body = build_a2a_message(data_type, payload)
-        msg_id = body["message"]["messageId"]
+        body = build_envelope(
+            payload_obj,
+            intent_id=intentId or None,
+            interaction=interaction,
+        )
+        envelope_data = body["message"]["parts"][0]["data"]
+        intent_id_out = envelope_data["intentId"]
+
         endpoint = contact.agent_endpoint
+        peer_did = contact.did
 
         ictx = InteractionContext(
             data_type=data_type,
             contact_id=contact.id,
             direction="outbound",
             status="sent",
-            context_data=json.dumps(payload),
+            intent_id=intent_id_out,
+            context_data=json.dumps(payload_obj),
         )
         session.add(ictx)
         session.commit()
         session.refresh(ictx)
+        task_id = ictx.id
 
     async def _deliver():
-        return await send_a2a_message(endpoint, body)
+        return await send_a2a_message(endpoint, body, peer_did=peer_did)
 
     try:
         loop = asyncio.get_running_loop()
@@ -214,52 +449,26 @@ def social_send(contact_id: str, content: str, data_type: str = "message") -> st
     except RuntimeError:
         pass
 
-    return json.dumps({"sent": True, "message_id": msg_id, "interaction_id": ictx.id})
-
-
-_COORDINATION_RESPONSE_TYPES = frozenset({"response", "confirmation", "confirmed"})
-
-
-def _add_coordination_guidance(entry: dict, interaction: InteractionContext) -> dict:
-    """Inject next-step instructions for coordination messages."""
-    dt = entry["data_type"]
-    cid = entry.get("contact_id", "")
-
-    if dt == "response" and interaction.status == "received":
-        entry["ACTION_REQUIRED"] = (
-            f"Present this plan to your user concisely and ask: '[details]. Confirm?' "
-            f"WAIT for the user to say yes/confirm. Then call: "
-            f"social_confirm_plan(contact_id='{cid}'). "
-            f"Do NOT say 'confirmed' yet — the other person still needs to accept."
-        )
-    elif dt == "confirmation" and interaction.status == "received":
-        entry["ACTION_REQUIRED"] = (
-            f"Present this plan to your user and ask: '[details]. Accept?' "
-            f"WAIT for the user to reply. Then call: "
-            f"social_accept_plan(interaction_id='{interaction.id}'). "
-            f"Output: 'Confirmed! Enjoy.'"
-        )
-    elif dt == "confirmed":
-        entry["ACTION_REQUIRED"] = (
-            "Tell your user: 'All set! [plan details].' This coordination is complete."
-        )
-
-    return entry
+    return json.dumps({"intentId": intent_id_out, "taskId": task_id})
 
 
 @mcp.tool()
-def social_inbox(limit: int = 20, data_type: str = "", contact_id: str = "") -> str:
-    """Check for inbound messages from other agents.
-
-    Each message has an 'id' you can use with social_respond() to reply.
-    Messages with status 'received' have not been responded to yet.
-    Coordination messages include an ACTION_REQUIRED field — follow it exactly.
+def social_inbox(
+    since: int = 0,
+    interaction: str = "",
+    contactId: str = "",
+    limit: int = 20,
+) -> str:
+    """List pending inbound messages or task updates.
 
     Args:
-        limit: Max number of messages to return (default 20).
-        data_type: Filter by message type (e.g. "coordination_request").
-        contact_id: Filter by a specific contact.
+        since: Unix timestamp — only return items received after this time.
+        interaction: Filter by interaction URI.
+        contactId: Filter by contact ID.
+        limit: Max items to return (default 20).
     """
+    from datetime import datetime, timezone
+
     with _get_session() as session:
         stmt = (
             select(InteractionContext)
@@ -267,78 +476,169 @@ def social_inbox(limit: int = 20, data_type: str = "", contact_id: str = "") -> 
             .order_by(InteractionContext.created_at.desc())
             .limit(limit)
         )
-        if data_type:
-            stmt = stmt.where(InteractionContext.data_type == data_type)
-        if contact_id:
-            stmt = stmt.where(InteractionContext.contact_id == contact_id)
+        if since:
+            cutoff = datetime.fromtimestamp(since, tz=timezone.utc)
+            stmt = stmt.where(InteractionContext.created_at > cutoff)
+        if contactId:
+            stmt = stmt.where(InteractionContext.contact_id == contactId)
+
         interactions = session.exec(stmt).all()
-        results = []
+        items = []
         for i in interactions:
-            contact = session.get(Contact, i.contact_id) if i.contact_id else None
-            entry = {
-                "id": i.id,
-                "data_type": i.data_type,
-                "contact": contact.name if contact else "Unknown",
-                "contact_id": i.contact_id,
-                "status": i.status,
-                "data": json.loads(i.context_data),
-                "created_at": i.created_at.isoformat(),
-            }
-            if i.data_type in _COORDINATION_RESPONSE_TYPES:
-                entry = _add_coordination_guidance(entry, i)
-            results.append(entry)
-        return json.dumps(results, indent=2)
+            items.append(
+                {
+                    "id": i.id,
+                    "contactId": i.contact_id,
+                    "intentId": i.intent_id or f"urn:uuid:{i.id}",
+                    "interaction": "",
+                    "payload": json.loads(i.context_data),
+                    "receivedAt": int(i.created_at.timestamp()),
+                }
+            )
+        return json.dumps({"items": items}, indent=2)
 
 
 @mcp.tool()
-def social_respond(interaction_id: str, content: str, data_type: str = "response") -> str:
-    """Reply to an inbound message from another agent.
-
-    Use the 'id' field from social_inbox() results as the interaction_id.
-    The reply is sent back to the original sender via A2A.
+async def social_inbox_wait(timeout_seconds: int = 30, last_event_id: str = "") -> str:
+    """Long-poll for inbox events. Blocks until events arrive or timeout.
 
     Args:
-        interaction_id: The id of the inbound message to reply to.
-        content: The response payload — a JSON string for structured data,
-                 or plain text.
-        data_type: A label for the response type (e.g. "response",
-                   "availability_response", "confirmation").
+        timeout_seconds: Max seconds to wait (default 30, capped at 90).
+        last_event_id: Opaque cursor from previous call. Empty = deliver from now.
+    """
+    from datetime import datetime, timezone
+
+    timeout = min(timeout_seconds, 90)
+    deadline = time.time() + timeout
+
+    cutoff_ts: float | None = None
+    if last_event_id:
+        try:
+            cutoff_ts = float(last_event_id)
+        except ValueError:
+            try:
+                cutoff_ts = datetime.fromisoformat(last_event_id).timestamp()
+            except ValueError:
+                pass
+
+    while time.time() < deadline:
+        with _get_session() as session:
+            stmt = (
+                select(InteractionContext)
+                .where(InteractionContext.direction == "inbound")
+                .order_by(InteractionContext.created_at.desc())
+                .limit(50)
+            )
+            if cutoff_ts:
+                cutoff_dt = datetime.fromtimestamp(cutoff_ts, tz=timezone.utc)
+                stmt = stmt.where(InteractionContext.created_at > cutoff_dt)
+
+            interactions = session.exec(stmt).all()
+            if interactions:
+                events = []
+                high_water: float = 0
+                for i in interactions:
+                    ts = i.created_at.timestamp()
+                    events.append(
+                        {
+                            "event_id": str(ts),
+                            "event": "inbox.message",
+                            "occurredAt": int(ts),
+                            "data": {
+                                "intentId": i.intent_id or f"urn:uuid:{i.id}",
+                                "contactId": i.contact_id,
+                                "interaction": "",
+                                "messageId": i.id,
+                            },
+                        }
+                    )
+                    if ts > high_water:
+                        high_water = ts
+                return json.dumps(
+                    {"events": events, "next_event_id": str(high_water)},
+                    indent=2,
+                )
+
+        _inbox_event.clear()
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
+        try:
+            await asyncio.wait_for(_inbox_event.wait(), timeout=min(remaining, 2.0))
+        except asyncio.TimeoutError:
+            pass
+
+    high_water_mark = str(time.time())
+    return json.dumps({"events": [], "next_event_id": last_event_id or high_water_mark}, indent=2)
+
+
+@mcp.tool()
+def social_respond(intentId: str, payload: str) -> str:
+    """Respond within an existing intent.
+
+    Args:
+        intentId: The intent ID to respond to (from social_inbox items).
+        payload: The response payload as a JSON object string.
     """
     with _get_session() as session:
-        ictx = session.get(InteractionContext, interaction_id)
+        ictx = session.exec(
+            select(InteractionContext)
+            .where(InteractionContext.intent_id == intentId)
+            .where(InteractionContext.direction == "inbound")
+            .order_by(InteractionContext.created_at.desc())
+            .limit(1)
+        ).first()
+
         if ictx is None:
-            return json.dumps({"error": "Interaction not found"})
+            ictx = session.get(InteractionContext, intentId)
+
+        if ictx is None:
+            return json.dumps({"error": "Intent not found"})
 
         contact = session.get(Contact, ictx.contact_id) if ictx.contact_id else None
         if contact is None:
             return json.dumps({"error": "Contact not found"})
 
         try:
-            payload = json.loads(content)
+            payload_obj = json.loads(payload)
         except (json.JSONDecodeError, TypeError):
-            payload = {"text": content}
+            payload_obj = {"text": payload}
 
+        data_type = payload_obj.get("type", "response")
+        payload_obj["type"] = data_type
         if data_type in ("confirmation", "confirmed"):
-            payload = _enrich_confirmation(payload, ictx.contact_id, session)
+            payload_obj = _enrich_confirmation(payload_obj, ictx.contact_id, session)
 
         ctx_data = json.loads(ictx.context_data)
-        ctx_data["response"] = payload
+        ctx_data["response"] = payload_obj
         ictx.context_data = json.dumps(ctx_data)
         ictx.status = "responded"
         ictx.updated_at = _utcnow()
         session.add(ictx)
         session.commit()
 
-        from app.executor import build_a2a_message, send_a2a_message
+        from app.executor import build_envelope, send_a2a_message
 
         endpoint = contact.agent_endpoint
-        task_id = ictx.a2a_task_id or None
-        interaction_id = ictx.id
+        peer_did = contact.did
 
-        body = build_a2a_message(data_type, payload, task_id=task_id)
+        body = build_envelope(payload_obj, intent_id=ictx.intent_id or None)
+
+        response_ictx = InteractionContext(
+            data_type=data_type,
+            contact_id=contact.id,
+            direction="outbound",
+            status="sent",
+            intent_id=ictx.intent_id,
+            context_data=json.dumps(payload_obj),
+        )
+        session.add(response_ictx)
+        session.commit()
+        session.refresh(response_ictx)
+        task_id = response_ictx.id
 
     async def _deliver():
-        return await send_a2a_message(endpoint, body)
+        return await send_a2a_message(endpoint, body, peer_did=peer_did)
 
     try:
         loop = asyncio.get_running_loop()
@@ -346,18 +646,18 @@ def social_respond(interaction_id: str, content: str, data_type: str = "response
     except RuntimeError:
         pass
 
-    return json.dumps({"responded": True, "interaction_id": interaction_id})
+    return json.dumps({"taskId": task_id})
 
 
-# ── Purpose-built coordination tools ──────────────────────────────────────
+# ── Coordination Tools (bonus, not spec-required) ─────────────────────────
 
 
-def _fire_and_forget(endpoint: str, body: dict) -> None:
+def _fire_and_forget(endpoint: str, body: dict, peer_did: str = "") -> None:
     """Schedule an A2A delivery on the running event loop."""
     from app.executor import send_a2a_message
 
     async def _deliver():
-        return await send_a2a_message(endpoint, body)
+        return await send_a2a_message(endpoint, body, peer_did=peer_did)
 
     try:
         loop = asyncio.get_running_loop()
@@ -367,58 +667,60 @@ def _fire_and_forget(endpoint: str, body: dict) -> None:
 
 
 @mcp.tool()
-def social_coordinate(contact_id: str, activity: str, details: str = "") -> str:
+def social_coordinate(contactId: str, activity: str, details: str = "") -> str:
     """Start coordinating a meetup (coffee, dinner, meeting, etc.) with a contact.
 
     Their agent will negotiate a time and place autonomously — the other
-    person is NOT notified until both agents agree on a plan. You will
-    receive the proposed plan via webhook; present it to your user and
-    then call social_confirm_plan() if they approve.
+    person is NOT notified until both agents agree on a plan.
 
     After calling this, END your turn. Do NOT poll with social_inbox.
 
     Args:
-        contact_id: The contact to coordinate with (from social_contacts).
+        contactId: The contact to coordinate with (from social_contacts).
         activity: What to do — e.g. "coffee", "lunch", "dinner", "meeting".
-        details: Any constraints — e.g. "Thursday morning before work",
-                 "somewhere in Mitte", "casual vibe".
+        details: Any constraints — e.g. "Thursday morning", "downtown".
     """
     with _get_session() as session:
-        contact = session.get(Contact, contact_id)
+        contact = session.get(Contact, contactId)
         if contact is None:
             return json.dumps({"error": "Contact not found"})
 
-        from app.executor import build_a2a_message
+        from app.executor import build_envelope
 
-        payload = {
+        payload_obj = {
+            "type": "coordination_request",
             "activity": activity,
             "details": details,
         }
-        data_type = "coordination_request"
 
-        body = build_a2a_message(data_type, payload)
+        body = build_envelope(payload_obj)
+        envelope_data = body["message"]["parts"][0]["data"]
+        intent_id = envelope_data["intentId"]
         endpoint = contact.agent_endpoint
+        peer_did = contact.did
+        contact_name = contact.name
 
         ictx = InteractionContext(
-            data_type=data_type,
+            data_type="coordination_request",
             contact_id=contact.id,
             direction="outbound",
             status="sent",
-            context_data=json.dumps(payload),
+            intent_id=intent_id,
+            context_data=json.dumps(payload_obj),
         )
         session.add(ictx)
         session.commit()
         session.refresh(ictx)
+        task_id = ictx.id
 
-    _fire_and_forget(endpoint, body)
+    _fire_and_forget(endpoint, body, peer_did=peer_did)
 
     return json.dumps(
         {
-            "sent": True,
-            "contact": contact.name,
-            "activity": activity,
+            "intentId": intent_id,
+            "taskId": task_id,
             "message": (
-                f"Coordination request sent to {contact.name}. "
+                f"Coordination request sent to {contact_name}. "
                 f"Their agent will negotiate a plan. "
                 f"You'll be notified when a plan is ready — do NOT poll."
             ),
@@ -427,34 +729,49 @@ def social_coordinate(contact_id: str, activity: str, details: str = "") -> str:
 
 
 @mcp.tool()
-def social_confirm_plan(contact_id: str) -> str:
+def social_confirm_plan(contactId: str = "") -> str:
     """Confirm an agreed coordination plan and send it to the other person.
 
-    Looks up the most recent agreed plan for this contact and sends a
-    confirmation. The other person's agent will then ask them to accept.
-
-    Call this ONLY after your user says "yes" / "confirm" / "ok".
-    Output to your user: "Sent confirmation. I'll let you know when they accept."
+    Call this after your user says "yes" / "confirm" / "ok" to a proposed plan.
+    If contactId is omitted, confirms the most recent pending plan.
 
     Args:
-        contact_id: The contact whose plan to confirm (from social_contacts).
+        contactId: Optional. The contact whose plan to confirm.
     """
     with _get_session() as session:
-        contact = session.get(Contact, contact_id)
-        if contact is None:
-            return json.dumps({"error": "Contact not found"})
+        pending = None
+        contact = None
 
-        pending = session.exec(
-            select(InteractionContext)
-            .where(InteractionContext.contact_id == contact.id)
-            .where(InteractionContext.data_type == "response")
-            .where(InteractionContext.direction == "inbound")
-            .order_by(InteractionContext.created_at.desc())
-            .limit(1)
-        ).first()
+        if contactId:
+            contact = session.get(Contact, contactId)
+            if contact is None:
+                return json.dumps({"error": "Contact not found"})
+            pending = session.exec(
+                select(InteractionContext)
+                .where(InteractionContext.contact_id == contact.id)
+                .where(InteractionContext.data_type == "response")
+                .where(InteractionContext.direction == "inbound")
+                .where(InteractionContext.status == "received")
+                .order_by(InteractionContext.created_at.desc())
+                .limit(1)
+            ).first()
 
         if pending is None:
-            return json.dumps({"error": "No pending plan found for this contact"})
+            pending = session.exec(
+                select(InteractionContext)
+                .where(InteractionContext.data_type == "response")
+                .where(InteractionContext.direction == "inbound")
+                .where(InteractionContext.status == "received")
+                .order_by(InteractionContext.created_at.desc())
+                .limit(1)
+            ).first()
+            if pending is not None and contact is None:
+                contact = session.get(Contact, pending.contact_id) if pending.contact_id else None
+
+        if pending is None:
+            return json.dumps({"error": "No pending plan found"})
+        if contact is None:
+            return json.dumps({"error": "Contact not found"})
 
         ctx_data = json.loads(pending.context_data)
         plan = None
@@ -465,12 +782,13 @@ def social_confirm_plan(contact_id: str) -> str:
         if plan is None:
             plan = ctx_data
 
-        payload = {"status": "confirmed", "plan": plan}
+        payload_obj = {"type": "confirmation", "status": "confirmed", "plan": plan}
 
-        from app.executor import build_a2a_message
+        from app.executor import build_envelope
 
-        body = build_a2a_message("confirmation", payload)
+        body = build_envelope(payload_obj)
         endpoint = contact.agent_endpoint
+        peer_did = contact.did
 
         pending.status = "responded"
         pending.updated_at = _utcnow()
@@ -480,13 +798,13 @@ def social_confirm_plan(contact_id: str) -> str:
             contact_id=contact.id,
             direction="outbound",
             status="sent",
-            context_data=json.dumps(payload),
+            context_data=json.dumps(payload_obj),
         )
         session.add(ictx)
         session.commit()
         session.refresh(ictx)
 
-    _fire_and_forget(endpoint, body)
+    _fire_and_forget(endpoint, body, peer_did=peer_did)
 
     return json.dumps(
         {
@@ -501,45 +819,65 @@ def social_confirm_plan(contact_id: str) -> str:
 
 
 @mcp.tool()
-def social_accept_plan(interaction_id: str) -> str:
+def social_accept_plan(intentId: str = "") -> str:
     """Accept a coordination plan that was proposed to your user.
 
-    Call this ONLY after your user says "yes" / "accept" / "ok" in response
-    to a plan proposal. Sends final confirmation back to the initiator.
-    Output to your user: "Confirmed! Enjoy."
+    Call this after your user says "yes" / "accept" / "ok" to a plan.
+    If intentId is omitted, accepts the most recent pending confirmation.
 
     Args:
-        interaction_id: The id of the inbound confirmation message.
+        intentId: Optional. The intent ID of the inbound confirmation message.
     """
     with _get_session() as session:
-        ictx = session.get(InteractionContext, interaction_id)
+        ictx = None
+        if intentId:
+            ictx = session.exec(
+                select(InteractionContext)
+                .where(InteractionContext.intent_id == intentId)
+                .where(InteractionContext.direction == "inbound")
+                .order_by(InteractionContext.created_at.desc())
+                .limit(1)
+            ).first()
+            if ictx is None:
+                ictx = session.get(InteractionContext, intentId)
+
         if ictx is None:
-            return json.dumps({"error": "Interaction not found"})
+            ictx = session.exec(
+                select(InteractionContext)
+                .where(InteractionContext.data_type == "confirmation")
+                .where(InteractionContext.direction == "inbound")
+                .where(InteractionContext.status == "received")
+                .order_by(InteractionContext.created_at.desc())
+                .limit(1)
+            ).first()
+
+        if ictx is None:
+            return json.dumps({"error": "No pending plan to accept"})
 
         contact = session.get(Contact, ictx.contact_id) if ictx.contact_id else None
         if contact is None:
             return json.dumps({"error": "Contact not found"})
 
-        payload = {"status": "confirmed"}
+        payload_obj = {"type": "confirmed", "status": "confirmed"}
 
         ctx_data = json.loads(ictx.context_data)
         if "plan" in ctx_data:
-            payload["plan"] = ctx_data["plan"]
+            payload_obj["plan"] = ctx_data["plan"]
 
-        ctx_data["response"] = payload
+        ctx_data["response"] = payload_obj
         ictx.context_data = json.dumps(ctx_data)
         ictx.status = "responded"
         ictx.updated_at = _utcnow()
         session.add(ictx)
         session.commit()
 
-        from app.executor import build_a2a_message
+        from app.executor import build_envelope
 
         endpoint = contact.agent_endpoint
-        task_id = ictx.a2a_task_id or None
-        body = build_a2a_message("confirmed", payload, task_id=task_id)
+        peer_did = contact.did
+        body = build_envelope(payload_obj, intent_id=ictx.intent_id or None)
 
-    _fire_and_forget(endpoint, body)
+    _fire_and_forget(endpoint, body, peer_did=peer_did)
 
     return json.dumps(
         {
@@ -569,14 +907,13 @@ def social_interactions(
             results.append(
                 {
                     "id": i.id,
-                    "data_type": i.data_type,
+                    "contactId": i.contact_id,
+                    "intentId": i.intent_id or "",
                     "contact": contact.name if contact else "Unknown",
-                    "contact_id": i.contact_id,
                     "direction": i.direction,
                     "status": i.status,
-                    "data": json.loads(i.context_data),
-                    "created_at": i.created_at.isoformat(),
-                    "updated_at": i.updated_at.isoformat(),
+                    "payload": json.loads(i.context_data),
+                    "receivedAt": int(i.created_at.timestamp()),
                 }
             )
-        return json.dumps(results, indent=2)
+        return json.dumps({"items": results}, indent=2)

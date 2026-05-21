@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Plus, Shield, X } from "lucide-react";
+import { Plus, Shield, X, Fingerprint } from "lucide-react";
 
 export function ContactsPage() {
   const queryClient = useQueryClient();
@@ -73,8 +73,22 @@ export function ContactsPage() {
                 {c.name.charAt(0).toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-fg truncate">{c.name}</p>
-                <p className="text-[10px] text-muted truncate">{c.agent_endpoint}</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm text-fg truncate">{c.name}</p>
+                  {c.shadowname && (
+                    <span className="text-[10px] text-accent/80 font-mono">@{c.shadowname}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {c.did ? (
+                    <p className="text-[10px] text-muted truncate flex items-center gap-1">
+                      <Fingerprint size={9} className="text-green-400 shrink-0" />
+                      <span className="font-mono">{c.did.slice(0, 20)}...{c.did.slice(-8)}</span>
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-muted truncate">{c.agent_endpoint}</p>
+                  )}
+                </div>
               </div>
               <div className="flex items-center gap-3 shrink-0">
                 {c.label && <span className="text-[10px] text-muted px-2 py-0.5 bg-surface-2 rounded">{c.label}</span>}

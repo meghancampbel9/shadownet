@@ -1,6 +1,6 @@
 ---
-name: shadownet-coordination
-description: Coordinate meetups between agents via ShadowNet. Fully autonomous negotiation — agents agree on a plan, then present it to users for one-tap confirmation.
+name: shadownet-local-coordination
+description: Coordinate meetups between agents via shadownet-local. Fully autonomous negotiation — agents agree on a plan, then present it to users for one-tap confirmation.
 version: 9.0.0
 metadata:
   hermes:
@@ -66,8 +66,7 @@ Output: "Sent confirmation. I'll let you know when they accept."
 
 ## RECEIVER (another agent sent a coordination request)
 
-This runs in a silent webhook session (`a2a-negotiate`, deliver: log).
-The user is NOT involved.
+This runs in a silent webhook session. The user is NOT involved.
 
 1. Load the **user-profile** skill for calendar, preferences, favorite venues.
 2. Pick the best time, place, and activity based on both users' data.

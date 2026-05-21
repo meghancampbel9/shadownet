@@ -1,0 +1,4 @@
+name: shadownet-local
+version: 0.1.0
+description: Bundles the shadownet-local messaging and coordination skills. The MCP tools are configured separately in ~/.hermes/config.yaml under mcp_servers.
+author: shadownet-local

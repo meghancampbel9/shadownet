@@ -41,6 +41,9 @@ class Contact(SQLModel, table=True):
     name: str
     agent_endpoint: str
     agent_public_key: str = ""
+    did: str = ""
+    shadowname: str = ""
+    public_key_jwk: str = "{}"
     label: str = ""
     notes: str = ""
     metadata_json: str = "{}"
@@ -64,6 +67,7 @@ class InteractionContext(SQLModel, table=True):
 
     id: str = Field(default_factory=_new_id, primary_key=True)
     a2a_task_id: str = Field(default="", index=True)
+    intent_id: str = ""
     data_type: str = ""
     contact_id: str = Field(foreign_key="contacts.id", index=True)
     direction: str = "inbound"

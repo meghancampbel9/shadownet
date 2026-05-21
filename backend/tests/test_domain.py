@@ -11,7 +11,7 @@ import json
 import pytest
 from sqlmodel import Session
 
-from app.grants import GrantDenied, enforce_grant, identify_sender
+from app.grants import GrantDenied, enforce_grant, find_contact_by_did
 from app.models import AccessGrant, Contact, GrantType, InteractionContext
 
 # ── Grant Enforcement ───────────────────────────────────────────────────────
@@ -43,14 +43,19 @@ class TestGrants:
         with pytest.raises(GrantDenied):
             enforce_grant(db_session, contact)
 
-    def test_identify_sender(self, db_session: Session, contact: Contact):
-        found = identify_sender(db_session, "AAAA")
+    def test_find_contact_by_did(self, db_session: Session, contact: Contact):
+        found = find_contact_by_did(db_session, "did:key:z6MkTestAlice")
         assert found is not None
         assert found.id == contact.id
 
-    def test_identify_sender_unknown(self, db_session: Session):
-        found = identify_sender(db_session, "UNKNOWN_KEY")
+    def test_find_contact_by_did_unknown(self, db_session: Session):
+        found = find_contact_by_did(db_session, "did:key:z6MkUnknown")
         assert found is None
+
+    def test_find_contact_by_did_full(self, db_session: Session, contact: Contact):
+        found = find_contact_by_did(db_session, "did:key:z6MkTestAlice")
+        assert found is not None
+        assert found.name == "Alice"
 
 
 # ── Data Model ──────────────────────────────────────────────────────────────
@@ -70,6 +75,22 @@ class TestDataModel:
         assert meta["relationship"] == "colleague"
         assert "AI" in meta["shared_interests"]
 
+    def test_contact_did_fields(self, db_session: Session):
+        c = Contact(
+            name="Carol",
+            agent_endpoint="http://carol:8340",
+            did="did:key:z6MkCarol",
+            shadowname="carol",
+            public_key_jwk=json.dumps({"kty": "OKP", "crv": "Ed25519"}),
+        )
+        db_session.add(c)
+        db_session.commit()
+        db_session.refresh(c)
+        assert c.did == "did:key:z6MkCarol"
+        assert c.shadowname == "carol"
+        jwk = json.loads(c.public_key_jwk)
+        assert jwk["kty"] == "OKP"
+
     def test_interaction_context_stores_data(self, db_session: Session, contact: Contact):
         ictx = InteractionContext(
             data_type="custom_request",
@@ -85,6 +106,20 @@ class TestDataModel:
         assert ictx.direction == "inbound"
         data = json.loads(ictx.context_data)
         assert data["key"] == "value"
+
+    def test_interaction_intent_id(self, db_session: Session, contact: Contact):
+        ictx = InteractionContext(
+            data_type="message",
+            contact_id=contact.id,
+            direction="inbound",
+            status="received",
+            intent_id="urn:uuid:abc-123",
+            context_data=json.dumps({"text": "hi"}),
+        )
+        db_session.add(ictx)
+        db_session.commit()
+        db_session.refresh(ictx)
+        assert ictx.intent_id == "urn:uuid:abc-123"
 
     def test_interaction_outbound(self, db_session: Session, contact: Contact):
         ictx = InteractionContext(
@@ -105,23 +140,61 @@ class TestDataModel:
 
 
 class TestA2AHelpers:
-    def test_build_a2a_message(self):
-        from app.executor import build_a2a_message
+    def test_build_envelope(self):
+        from app.executor import build_envelope
 
-        msg = build_a2a_message("test_type", {"key": "val"})
-        assert "message" in msg
-        parts = msg["message"]["parts"]
+        env = build_envelope({"type": "test_type", "key": "val"})
+        assert "message" in env
+        assert env["message"]["role"] == "ROLE_AGENT"
+        parts = env["message"]["parts"]
         assert len(parts) == 1
-        assert parts[0]["data"]["type"] == "test_type"
-        assert parts[0]["data"]["key"] == "val"
+        assert parts[0]["type"] == "shadownet/v1+envelope"
+        payload = parts[0]["data"]["payload"]
+        assert payload["type"] == "test_type"
+        assert payload["key"] == "val"
+        assert "interaction" not in parts[0]["data"]
 
-    def test_build_a2a_message_with_task_id(self):
-        from app.executor import build_a2a_message
+    def test_build_envelope_with_intent(self):
+        from app.executor import build_envelope
 
-        msg = build_a2a_message("test_type", {}, task_id="task-123")
-        assert msg["message"]["taskId"] == "task-123"
+        env = build_envelope({"type": "test"}, intent_id="my-intent-id")
+        data = env["message"]["parts"][0]["data"]
+        assert data["intentId"] == "urn:uuid:my-intent-id"
+        assert "interaction" not in data
 
-    def test_extract_data_part(self):
+    def test_build_envelope_with_interaction(self):
+        from app.executor import build_envelope
+
+        env = build_envelope(
+            {"type": "test"}, interaction="urn:shadownet:interaction:abc"
+        )
+        data = env["message"]["parts"][0]["data"]
+        assert data["interaction"] == "urn:shadownet:interaction:abc"
+
+    def test_extract_data_part_envelope(self):
+        from app.executor import ENVELOPE_PART_TYPE, extract_data_part
+
+        body = {
+            "message": {
+                "parts": [
+                    {
+                        "type": ENVELOPE_PART_TYPE,
+                        "mediaType": "application/json",
+                        "data": {
+                            "shadownet:v": "0.1",
+                            "intentId": "urn:uuid:123",
+                            "payload": {"type": "foo", "bar": 1},
+                        },
+                    }
+                ]
+            }
+        }
+        dtype, data, iid = extract_data_part(body)
+        assert dtype == "foo"
+        assert data["bar"] == 1
+        assert iid == "urn:uuid:123"
+
+    def test_extract_data_part_legacy(self):
         from app.executor import extract_data_part
 
         body = {
@@ -129,17 +202,19 @@ class TestA2AHelpers:
                 "parts": [{"data": {"type": "foo", "bar": 1}, "mediaType": "application/json"}]
             }
         }
-        dtype, data = extract_data_part(body)
+        dtype, data, iid = extract_data_part(body)
         assert dtype == "foo"
         assert data["bar"] == 1
+        assert iid == ""
 
     def test_extract_text_part(self):
         from app.executor import extract_data_part
 
         body = {"message": {"parts": [{"text": "hello"}]}}
-        dtype, data = extract_data_part(body)
+        dtype, data, iid = extract_data_part(body)
         assert dtype == "message"
         assert data["text"] == "hello"
+        assert iid == ""
 
     def test_message_response(self):
         from app.executor import data_part, message_response

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "shadownet-local": {
+      "type": "http",
+      "url": "${SHADOWNET_LOCAL_MCP_URL:-http://localhost:8341/mcp}"
+    }
+  }
+}

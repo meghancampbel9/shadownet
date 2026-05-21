@@ -15,6 +15,7 @@
 #
 # The same secret must be set in shadownet's .env as
 # SHADOWNET_NOTIFICATION_WEBHOOK_SECRET.
+# SHADOWNET_NOTIFICATION_NEGOTIATE_URL must point to the a2a-negotiate route.
 
 platforms:
   webhook:
@@ -27,16 +28,20 @@ platforms:
           deliver: log
           prompt: >-
             Load shadownet-coordination AND user-profile skills.
-            A message from {contact} (interaction_id: {interaction_id}) (type: {data_type}).
-            Data: {data}. Follow the RECEIVER FLOW.
+            A message from {contact} (contact_id: {contact_id}) (interaction_id: {interaction_id}) (type: {data_type}).
+            Data: {data}. Follow the RECEIVER FLOW steps 1-3 autonomously.
+            Output "Done." when finished. Do NOT notify the user.
         a2a-inbox:
           secret: "<shared secret>"
           deliver: auto
           prompt: >-
             Load shadownet-coordination skill.
-            A message from {contact} (interaction_id: {interaction_id}) (type: {data_type}).
+            A message from {contact} (contact_id: {contact_id}) (interaction_id: {interaction_id}) (type: {data_type}).
             Data: {data}.
-            RULES: Present the plan to your user and ask them to confirm/accept.
-            Output ONLY the question, then STOP. Do NOT call any tool until the user replies.
-            When user confirms: if data_type is "response", call social_confirm_plan(contact_id). If data_type is "confirmation", call social_accept_plan(interaction_id="{interaction_id}"). If data_type is "confirmed", just say "All set!" and stop.
-            Follow the skill procedure for this data_type.
+            RULES: You are in a one-shot webhook session. You CANNOT wait for the user to reply.
+            Output ONE short message based on data_type and STOP. Do NOT call any tool.
+            - If data_type is "response": present the plan concisely and ask "Confirm?" (e.g. "Coffee at The Daily Grind, Friday 10am. Confirm?")
+            - If data_type is "confirmation": tell user "[contact] confirmed the plan. Accept?" and summarize the plan.
+            - If data_type is "confirmed": say "All set! [brief plan summary]."
+            - If data_type is "message": relay the message from {contact}.
+            Do NOT call social_confirm_plan, social_accept_plan, or any other tool. The user will reply and a new session will handle it.

@@ -1,6 +1,6 @@
 ---
-name: shadownet-coordination
-description: Coordinate meetups between agents via ShadowNet. Fully autonomous negotiation — agents agree on a plan, then present it to users for one-tap confirmation.
+name: shadownet-local-coordination
+description: Coordinate meetups between agents via shadownet-local. Fully autonomous negotiation — agents agree on a plan, then present it to users for one-tap confirmation.
 version: 9.0.0
 metadata:
   hermes:

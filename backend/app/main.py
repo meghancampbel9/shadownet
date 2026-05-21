@@ -24,6 +24,12 @@ async def lifespan(app: FastAPI):
     logger.info("shadownet starting up")
     init_db()
     init_identity()
+
+    from app.mcp_server import load_persisted_webhook
+    from app.signing import init_protocol
+
+    init_protocol()
+    load_persisted_webhook()
     logger.info("Agent card (A2A v1.0): %s/.well-known/agent-card.json", settings.external_url)
     yield
     logger.info("shadownet shutting down")
@@ -66,12 +72,13 @@ app.include_router(inbox_stream_router)
 
 @app.get("/health")
 def health():
-    from app.identity import get_public_key_b64
+    from app.identity import get_did, get_public_key_b64
 
     return {
         "status": "ok",
         "agent": settings.agent_name,
         "owner": settings.owner_name,
+        "did": get_did(),
         "public_key": get_public_key_b64(),
     }
 

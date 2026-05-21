@@ -8,7 +8,7 @@ RUN npm run build
 
 # --- Stage 2: Python backend ---
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
-LABEL org.opencontainers.image.source=https://github.com/meghancampbel9/shadownet
+LABEL org.opencontainers.image.source=https://github.com/shadownet-protocol/shadownet-local
 
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_NO_DEV=1
 ENV PATH="/app/.venv/bin:$PATH"
