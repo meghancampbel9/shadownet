@@ -16,14 +16,15 @@ deploy.sh
 
 # Build output
 frontend/dist/
+*.tsbuildinfo
 
 # Environment (secrets)
 .env
 .env.local
 .env.production
 
-# Private docs
-TEST_SETUP.md
+# Private docs (personal deployment details)
+AGENTS.local.md
 
 # IDE
 .vscode/

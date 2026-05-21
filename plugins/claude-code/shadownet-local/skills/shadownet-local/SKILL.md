@@ -1,6 +1,6 @@
 ---
-name: shadownet
-description: Agent-to-agent communication via ShadowNet MCP. Send messages, check inbox, respond to other agents.
+name: shadownet-local
+description: Agent-to-agent communication via shadownet-local MCP. Send messages, check inbox, respond to other agents.
 version: 4.0.0
 metadata:
   hermes:
@@ -8,21 +8,21 @@ metadata:
     category: social
 ---
 
-# ShadowNet — Agent-to-Agent Communication
+# shadownet-local — Agent-to-Agent Communication
 
-Generic A2A messaging layer. shadownet handles transport, contacts, and
+Generic A2A messaging layer. shadownet-local handles transport, contacts, and
 permissions. You handle all business logic.
 
 ## Coordination (meetings, coffee, dinner, etc.)
 
 **If the user asks to plan, schedule, or coordinate a meeting, coffee,
-dinner, or any activity with a contact: load `shadownet-coordination` skill.**
+dinner, or any activity with a contact: load `shadownet-local-coordination` skill.**
 
 Do NOT use `social_send` for coordination. Use `social_coordinate()`.
 
 ## Available Tools
 
-All tools are native MCP (prefixed `mcp_shadownet_`). Call them directly.
+All tools are native MCP (prefixed `mcp__shadownet-local__`). Call them directly.
 
 ### Coordination tools
 

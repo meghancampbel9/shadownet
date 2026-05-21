@@ -1,63 +1,130 @@
-"""A2A authentication helpers.
+"""A2A authentication helpers — shadownet-local protocol.
 
-Provides short-lived JWT tokens signed with our Ed25519 private key for
-outbound requests, and verification of inbound JWTs against a contact's
-known public key.
+Outbound: DID-bound session token + Verifiable Presentation handshake.
+Inbound: verify_handshake validates session JWT + optional VP.
+Also initializes shared protocol dependencies (Resolver, TrustStore, SNSClient).
 """
 
 from __future__ import annotations
 
-import time
+import json
+import logging
+from typing import TYPE_CHECKING
 
-import jwt
-from cryptography.hazmat.primitives.asymmetric.ed25519 import (
-    Ed25519PrivateKey,
-    Ed25519PublicKey,
-)
-from nacl.encoding import Base64Encoder
-from nacl.signing import VerifyKey
+import httpx
+from shadownet.a2a.client import build_handshake_headers
+from shadownet.a2a.server import verify_handshake
+from shadownet.did.resolver import Resolver
+from shadownet.sns.client import SNSClient
+from shadownet.trust import TrustStore
+from shadownet.vc.presentation import mint_presentation
 
 from app.config import settings
-from app.identity import get_public_key_b64, get_signing_key
+from app.identity import get_did, get_keypair
 
-JWT_ALGORITHM = "EdDSA"
-JWT_LIFETIME_SECONDS = 120
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
+    from shadownet.a2a.server import HandshakeContext
 
-def _nacl_to_crypto_private() -> Ed25519PrivateKey:
-    """Convert our PyNaCl SigningKey to a cryptography Ed25519PrivateKey."""
-    sk = get_signing_key()
-    raw_seed = bytes(sk)  # 32-byte seed
-    return Ed25519PrivateKey.from_private_bytes(raw_seed)
+logger = logging.getLogger(__name__)
 
-
-def _b64_to_crypto_public(pub_b64: str) -> Ed25519PublicKey:
-    """Convert a base64-encoded Ed25519 public key to a cryptography key object."""
-    vk = VerifyKey(pub_b64.encode(), encoder=Base64Encoder)
-    return Ed25519PublicKey.from_public_bytes(bytes(vk))
+_resolver: Resolver | None = None
+_trust_store: TrustStore | None = None
+_sns_client: SNSClient | None = None
+_http_client: httpx.AsyncClient | None = None
 
 
-def build_a2a_jwt() -> str:
-    """Create a short-lived JWT signed with our Ed25519 key."""
-    private_key = _nacl_to_crypto_private()
+def init_protocol() -> None:
+    """Initialize protocol-level dependencies at app startup."""
+    global _resolver, _trust_store, _sns_client, _http_client
 
-    now = int(time.time())
-    payload = {
-        "sub": settings.external_url,
-        "pub": get_public_key_b64(),
-        "iat": now,
-        "exp": now + JWT_LIFETIME_SECONDS,
-    }
-    return jwt.encode(payload, private_key, algorithm=JWT_ALGORITHM)
+    from shadownet.did.web import WebDIDResolver
+
+    _http_client = httpx.AsyncClient()
+    web_resolver = WebDIDResolver(_http_client)
+    _resolver = Resolver(web=web_resolver)
+
+    pairs = json.loads(settings.trust_store_pairs)
+    if pairs:
+        _trust_store = TrustStore.from_pairs(pairs)
+    else:
+        _trust_store = TrustStore(entries=())
+
+    if settings.sns_provider_host:
+        _sns_client = SNSClient(_http_client, resolver=_resolver)
 
 
-def verify_a2a_jwt(token: str, expected_public_key_b64: str) -> dict | None:
-    """Verify and decode a JWT using the sender's known Ed25519 public key.
+def get_resolver() -> Resolver:
+    if _resolver is None:
+        raise RuntimeError("Protocol not initialized — call init_protocol() first")
+    return _resolver
 
-    Returns the decoded claims dict on success, None on any failure.
+
+def get_trust_store() -> TrustStore:
+    if _trust_store is None:
+        raise RuntimeError("Protocol not initialized — call init_protocol() first")
+    return _trust_store
+
+
+def get_sns_client() -> SNSClient | None:
+    return _sns_client
+
+
+def build_outbound_headers(
+    audience_did: str, credential_jwts: list[str] | None = None
+) -> dict[str, str]:
+    """Build A2A handshake headers for an outbound request."""
+    keypair = get_keypair()
+    my_did = get_did()
+
+    presentation_jwt: str | None = None
+    if credential_jwts:
+        presentation_jwt = mint_presentation(
+            holder_key=keypair,
+            holder_did=my_did,
+            audience_did=audience_did,
+            credentials=credential_jwts,
+        )
+
+    return build_handshake_headers(
+        holder_key=keypair,
+        holder_did=my_did,
+        audience_did=audience_did,
+        presentation_jwt=presentation_jwt,
+    )
+
+
+async def verify_inbound(headers: Mapping[str, str]) -> HandshakeContext:
+    """Verify inbound A2A request using RFC-0006 handshake.
+
+    Known contacts (by DID) are treated as pre-authorized — VP is not
+    required since we have no SCA infrastructure yet. Unknown DIDs will
+    still get PresentationRequiredError per the spec.
     """
-    try:
-        public_key = _b64_to_crypto_public(expected_public_key_b64)
-        return jwt.decode(token, public_key, algorithms=[JWT_ALGORITHM])
-    except Exception:
-        return None
+    from sqlmodel import Session, select
+
+    from app.database import engine
+    from app.models import Contact
+
+    with Session(engine) as session:
+        contacts = session.exec(select(Contact).where(Contact.did != "")).all()
+        trusted_dids = {c.did for c in contacts}
+
+    class _TrustedCache:
+        """Dict-like that answers 'in' for known contact DIDs."""
+
+        def __contains__(self, did: str) -> bool:
+            return did in trusted_dids
+
+        def __getitem__(self, did: str):
+            return None
+
+    return await verify_handshake(
+        headers,
+        expected_audience=get_did(),
+        resolver=get_resolver(),
+        trust_store=get_trust_store(),
+        required_predicate=None,
+        cached_presentations=_TrustedCache(),  # type: ignore[arg-type]
+    )

@@ -14,6 +14,9 @@ export interface Contact {
   name: string;
   agent_endpoint: string;
   agent_public_key: string;
+  did: string;
+  shadowname: string;
+  public_key_jwk: string;
   label: string;
   notes: string;
   metadata: Record<string, unknown>;
@@ -52,5 +55,6 @@ export interface HealthResponse {
   status: string;
   agent: string;
   owner: string;
+  did: string;
   public_key: string;
 }

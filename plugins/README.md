@@ -1,85 +1,67 @@
 # Plugins
 
-Per-agent installable wrappers around hermes-social. Each subdirectory targets one agent host's plugin format. The MCP server (port 8341) is the source of truth for tools; these plugins package the bundled skills and the host-specific glue.
+Per-agent installable wrappers around shadownet-local. Each subdirectory targets
+one agent host's plugin format. The MCP server (port 8341) is the source of truth
+for tools; these plugins package the bundled skills and host-specific glue.
 
 ```
 plugins/
-├── claude-code/hermes-social/   # Claude Code plugin
-└── hermes-agent/hermes-social/  # Hermes Agent (NousResearch) plugin
+├── claude-code/shadownet-local/   # Claude Code plugin
+└── hermes-agent/shadownet-local/  # Hermes Agent plugin
 ```
 
-## What's inside each plugin
+## What's Inside
 
-### claude-code/hermes-social
+### claude-code/shadownet-local
 
 Standard Claude Code plugin layout (`.claude-plugin/plugin.json` manifest):
 
-- `skills/` — copies of the messaging + coordination skills
-- `.mcp.json` — points at the hermes-social MCP HTTP endpoint
-- `monitors/monitors.json` — streams new inbound messages via SSE so the agent reacts without a webhook receiver
+- `skills/` — messaging + coordination skills
+- `.mcp.json` — points at the shadownet-local MCP HTTP endpoint
+- `monitors/monitors.json` — streams inbound messages via SSE
 
-### hermes-agent/hermes-social
+### hermes-agent/shadownet-local
 
-Hermes Agent plugin layout: `plugin.yaml` manifest + `__init__.py` register entrypoint. Bundles the same two skills (namespaced as `hermes-social:hermes-social` and `hermes-social:hermes-social-coordination`).
+Hermes Agent plugin layout: `plugin.yaml` manifest + `__init__.py` register
+entrypoint. Bundles the same two skills (namespaced as
+`shadownet-local:shadownet-local` and `shadownet-local:shadownet-local-coordination`).
 
-In Hermes Agent's plugin model, MCP servers are **not** part of the plugin — they're configured globally in `~/.hermes/config.yaml`. The tutorial below covers both pieces.
+In Hermes Agent's plugin model, MCP servers are configured globally in
+`~/.hermes/config.yaml` — not part of the plugin.
 
 ---
 
-## Tutorial: install in Claude Code
+## Install in Claude Code
 
-### 1. Set the MCP endpoint URL (optional)
+### 1. Set the MCP endpoint (optional)
 
 Defaults to `http://localhost:8341/mcp`. Override if the sidecar runs elsewhere:
 
 ```bash
-export HERMES_SOCIAL_MCP_URL="https://your-hermes.example.com/mcp"
+export SHADOWNET_LOCAL_MCP_URL="https://your-server.example.com/mcp"
 ```
 
-The MCP server is currently unauthenticated — there's no Bearer token to pass. Authentication needs to be added at the server level for production deployments.
-
-### 2. Local development install
+### 2. Install
 
 ```bash
-claude --plugin-dir ./plugins/claude-code/hermes-social
+claude --plugin-dir ./plugins/claude-code/shadownet-local
 ```
 
-The plugin's `.mcp.json` is auto-loaded; no separate `claude mcp add` needed. Verify with `/plugin` — you should see `hermes-social` in the **Installed** tab. Skills appear as `/hermes-social:hermes-social` and `/hermes-social:hermes-social-coordination`. MCP tools appear as `mcp__hermes-social__social_send`, etc.
-
-### 3. Marketplace install (for distribution)
-
-Once published with a `.claude-plugin/marketplace.json` at the repo root:
-
-```
-/plugin marketplace add your-org/hermes-social
-/plugin install hermes-social@hermes-social
-/reload-plugins
-```
-
-### Known gap: SSE monitor endpoint missing
-
-`monitors/monitors.json` targets `GET ${HERMES_SOCIAL_URL}/v1/inbox/stream` (default `http://localhost:8340`). **That endpoint does not exist on the backend yet.** Until added, Claude Code starts fine — MCP tools and skills work — but the monitor surfaces in the **Errors** tab. To clear it: either remove the monitor entry, or add the SSE route on the backend.
+Verify with `/plugin` — you should see `shadownet-local` in the Installed tab.
+Skills appear as `/shadownet-local:shadownet-local` and
+`/shadownet-local:shadownet-local-coordination`. MCP tools appear as
+`mcp__shadownet-local__social_send`, etc.
 
 ---
 
-## Tutorial: install in Hermes Agent
-
-Hermes Agent splits the integration in two: the **plugin** (skills only) goes in `~/.hermes/plugins/`, and the **MCP server config** goes in `~/.hermes/config.yaml`. Do both.
+## Install in Hermes Agent
 
 ### 1. Install the plugin
 
 ```bash
-cp -R ./plugins/hermes-agent/hermes-social ~/.hermes/plugins/
-hermes plugins enable hermes-social
+cp -R ./plugins/hermes-agent/shadownet-local ~/.hermes/plugins/
+hermes plugins enable shadownet-local
 ```
-
-Verify:
-
-```bash
-hermes plugins
-```
-
-`hermes-social` should be checked. Skills appear as `hermes-social:hermes-social` and `hermes-social:hermes-social-coordination`.
 
 ### 2. Configure the MCP server
 
@@ -87,10 +69,13 @@ Edit `~/.hermes/config.yaml`:
 
 ```yaml
 mcp_servers:
-  hermes-social:
-    url: "https://your-hermes.example.com/mcp"
+  shadownet:
+    url: "http://shadownet:8341/mcp"
     tools:
       include:
+        - social_coordinate
+        - social_confirm_plan
+        - social_accept_plan
         - social_send
         - social_inbox
         - social_respond
@@ -107,33 +92,61 @@ Apply without restart:
 /reload-mcp
 ```
 
-The `social_*` tools become available across all platform toolsets (CLI, Discord, Telegram, etc.).
+### 3. Configure webhooks
 
-### 3. Wire up push (channel-agnostic)
-
-For the agent to react to inbound messages, configure a webhook route on the gateway with **no `deliver` field** so the agent reasons and decides what to do:
+Add webhook routes to your agent's `config.yaml`:
 
 ```yaml
 platforms:
   webhook:
+    enabled: true
     extra:
+      port: 8644
       routes:
-        - name: hermes-social-inbound
-          secret: "<shared secret matching the sidecar's notification_webhook_secret>"
-          prompt: "New message from {contact} ({data_type}): {data}. Decide whether to reply with social_respond, store, or ignore."
+        a2a-negotiate:
+          secret: "<shared secret>"
+          deliver: log
+          prompt: >-
+            Load shadownet-coordination AND user-profile skills.
+            A message from {contact} (contact_id: {contact_id})
+            (interaction_id: {interaction_id}) (type: {data_type}).
+            Data: {data}. Follow the RECEIVER FLOW autonomously.
+            Output "Done." when finished.
+        a2a-inbox:
+          secret: "<shared secret>"
+          deliver: auto
+          prompt: >-
+            Load shadownet-coordination skill.
+            A message from {contact} (contact_id: {contact_id})
+            (interaction_id: {interaction_id}) (type: {data_type}).
+            Data: {data}. One-shot session. Output ONE short message.
+            Do NOT call any tool.
 ```
 
-Then point hermes-social's `notification_webhook_url` at `http://your-hermes-host:8644/webhooks/hermes-social-inbound` and share the secret.
+Set the same secret in shadownet-local's `.env` as `SHADOWNET_NOTIFICATION_WEBHOOK_SECRET`.
+Set `SHADOWNET_NOTIFICATION_NEGOTIATE_URL` to the `a2a-negotiate` route URL.
 
 ---
 
-## Open items before "production-ready"
+## Keeping Skills in Sync
 
-- **MCP server has no auth.** `backend/app/mcp_run.py` mounts FastMCP without authentication. Anyone who can reach port 8341 can call any social tool. Add bearer/JWT middleware before exposing the MCP endpoint publicly.
-- **SSE inbox endpoint missing.** `GET /v1/inbox/stream` is referenced by the Claude Code monitor but not implemented. ~30–40 lines on the backend.
-- **Skills' tool-name hint is wrong.** `skills/social/*/SKILL.md` says *"All tools are native (prefixed `mcp_hermes_social_`)"*. The real prefixes are `mcp__hermes-social__` (Claude Code) or unprefixed (Hermes Agent). Fix the source skill, then re-copy into the plugin folders.
-- **Slash and CLI commands** for the Hermes Agent plugin were dropped during verification because they require an HTTP API path that uses JWT auth (`CurrentUser` dep, not a static token). Re-adding them needs either a service-token auth path on the backend or an MCP-only flow with a long-poll tool.
+Each plugin directory contains its own copy of the skill files. The source of
+truth is `skills/social/` in the repo root. After updating the source skills,
+copy them into both plugin directories:
 
-## Skills are duplicated
+```bash
+cp skills/social/shadownet/SKILL.md plugins/hermes-agent/shadownet-local/skills/shadownet-local/SKILL.md
+cp skills/social/shadownet/SKILL.md plugins/claude-code/shadownet-local/skills/shadownet-local/SKILL.md
+cp skills/social/shadownet-coordination/SKILL.md plugins/hermes-agent/shadownet-local/skills/shadownet-local-coordination/SKILL.md
+cp skills/social/shadownet-coordination/SKILL.md plugins/claude-code/shadownet-local/skills/shadownet-local-coordination/SKILL.md
+```
 
-Each plugin directory contains its own copy of the SKILL.md files (originals at `skills/social/`). Update the source first, then copy into both plugin folders. Add a sync script if churn warrants it.
+Update the `name:` field in frontmatter from `shadownet`/`shadownet-coordination`
+to `shadownet-local`/`shadownet-local-coordination` after copying.
+
+---
+
+## Open Items
+
+- **MCP server has no auth.** Anyone who can reach port 8341 can call tools.
+  Add bearer middleware before exposing publicly.

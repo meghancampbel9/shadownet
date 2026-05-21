@@ -1,46 +1,45 @@
-# shadownet
+# shadownet-local
 
-Agent-to-agent communication layer built on the
-[A2A protocol (v1.0)](https://google.github.io/a2a/).
+Self-hosted agent-to-agent communication sidecar built on the
+[Shadownet v0.1 protocol](https://github.com/shadownet-protocol/shadownet-specs).
 
-shadownet handles identity, transport, contact graph, permissions,
-and message storage. The host agent (Hermes, OpenClaw, or any
-A2A/MCP-compatible framework) owns all business logic.
+shadownet-local handles identity, transport, contacts, permissions, and message
+storage. The host agent (Hermes, Claude Code, or any MCP-compatible framework)
+owns all business logic.
 
-## What it does
+## Features
 
-- **Identity**: Ed25519 keypair, A2A agent cards, JWT authentication
-- **Transport**: Send and receive A2A messages over HTTP+JSON
-- **Contacts**: Manage a graph of known remote agents
-- **Permissions**: Per-contact allow/deny grants
-- **Storage**: SQLite-backed message history (inbound + outbound)
-- **MCP interface**: Tools for the host agent to send, receive, and respond
-- **Webhooks**: Notify the host agent of inbound messages
+- **Identity** — Ed25519 keypair, DID:key, A2A agent cards
+- **Transport** — Send and receive A2A messages over HTTP+JSON
+- **Contacts** — Manage a graph of known remote agents with DID verification
+- **Permissions** — Per-contact allow/deny grants
+- **Storage** — SQLite-backed message history (inbound + outbound)
+- **MCP interface** — Tools for the host agent to send, receive, and coordinate
+- **Webhooks** — Notify the host agent of inbound messages with routing by type
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/meghancampbel9/shadownet.git
-cd shadownet
+git clone https://github.com/shadownet-protocol/shadownet-local.git
+cd shadownet-local
 ./setup.sh              # generates secrets, writes .env
-docker compose up -d    # builds and starts shadownet
+docker compose up -d    # builds and starts the sidecar
 ```
 
 `setup.sh` will:
 1. Generate JWT and webhook secrets
 2. Ask for your instance URL, agent name, and owner name
 3. Detect your agent's Docker network
-4. Optionally configure the webhook for agent notifications
-5. Write `.env` and offer to start the containers
+4. Write `.env` and offer to start the containers
 
-After startup, open your configured URL to create an account and add contacts.
+After startup, open your configured URL to manage contacts and view messages.
 
-## Deployment Options
+## Deployment
 
 ### Default (plain ports)
 
-Exposes the UI on port 8340 and MCP on port 8341. Put your own reverse
-proxy (Nginx, Caddy, etc.) in front for HTTPS.
+Exposes the UI on port 8340 and MCP on port 8341. Use your own reverse proxy
+(Nginx, Caddy, Traefik) for HTTPS.
 
 ```bash
 docker compose up -d
@@ -48,10 +47,8 @@ docker compose up -d
 
 ### With Traefik
 
-If you run Traefik, use the overlay to add labels and Let's Encrypt:
-
 ```bash
-# Add TRAEFIK_HOST=your.server.com to .env first
+# Set TRAEFIK_HOST=your.server.com in .env
 docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d
 ```
 
@@ -60,13 +57,22 @@ docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d
 Spin up a second instance for local A2A testing:
 
 ```bash
-# Create .env.test (copy .env, change identity values)
 docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
 ```
 
 ## Agent Integration
 
-### 1. Install skills
+### 1. Connect via MCP
+
+The MCP server runs on port 8341. Point your agent at:
+
+```
+http://shadownet:8341/mcp
+```
+
+(Use the Docker service name if on the same network, or the public URL otherwise.)
+
+### 2. Install skills
 
 Copy the coordination skills into your agent's skills directory:
 
@@ -74,66 +80,37 @@ Copy the coordination skills into your agent's skills directory:
 cp -r skills/social/ ~/.hermes/skills/social/
 ```
 
-### 2. Configure webhook routes
+Or install the plugin for your agent host — see [`plugins/README.md`](plugins/README.md).
 
-Add two webhook routes to your agent's `config.yaml` so shadownet
-can wake your agent when messages arrive. See
-[`agent-config.example.yaml`](agent-config.example.yaml) for the full
-config, or add this:
+### 3. Configure webhooks
 
-```yaml
-platforms:
-  webhook:
-    enabled: true
-    extra:
-      port: 8644
-      routes:
-        a2a-negotiate:
-          secret: "<webhook secret from setup>"
-          deliver: log
-          prompt: >-
-            Load shadownet-coordination AND user-profile skills.
-            A message from {contact} (type: {data_type}).
-            Data: {data}. Follow the RECEIVER FLOW.
-        a2a-inbox:
-          secret: "<webhook secret from setup>"
-          deliver: auto
-          prompt: >-
-            Load shadownet-coordination skill.
-            A message from {contact} (type: {data_type}).
-            Data: {data}. Follow the skill procedure for this data_type.
-```
+Add two webhook routes so shadownet-local can notify your agent of inbound messages.
+See [`agent-config.example.yaml`](agent-config.example.yaml) for the full config.
 
-shadownet routes `coordination_request` messages to `a2a-negotiate`
-(silent, `deliver: log`) and everything else to `a2a-inbox` (user-facing,
-`deliver: auto`). `deliver: auto` resolves to your first connected chat
-platform (Telegram, Discord, Slack, etc.).
-
-### 3. Webhook payload
-
-For non-Hermes agents, point `NOTIFICATION_WEBHOOK_URL` at any HTTP
-endpoint. The POST body is:
-
-```json
-{
-  "event": "message_received",
-  "contact": "sender name",
-  "data_type": "message",
-  "interaction_id": "...",
-  "data": { ... }
-}
-```
+shadownet-local routes messages by type:
+- `coordination_request` → `a2a-negotiate` (agent handles silently)
+- Everything else → `a2a-inbox` (delivered to user's chat platform)
 
 ## MCP Tools
 
-| Tool | Description |
-|------|-------------|
+### Coordination
+
+| Tool | Purpose |
+|------|---------|
+| `social_coordinate(contactId, activity, details)` | Start a coordination — agents negotiate autonomously |
+| `social_confirm_plan()` | Confirm a proposed plan (auto-finds the pending interaction) |
+| `social_accept_plan()` | Accept a confirmed plan (auto-finds the pending interaction) |
+
+### Messaging
+
+| Tool | Purpose |
+|------|---------|
 | `social_send(contact_id, content, data_type)` | Send a message to a contact |
+| `social_respond(intentId, payload)` | Reply to an interaction (`payload` is a JSON string) |
 | `social_inbox(limit, data_type, contact_id)` | List recent inbound messages |
-| `social_respond(interaction_id, content, data_type)` | Reply to a message |
-| `social_contacts(query)` | List contacts |
-| `social_contact_detail(contact_id)` | Get contact details |
-| `social_interactions(data_type, status_filter, direction, limit)` | List all interactions |
+| `social_contacts(query)` | List or search contacts |
+| `social_contact_detail(contact_id)` | Get full contact details |
+| `social_interactions(data_type, status_filter, direction, limit)` | List interactions |
 
 ## Message Flow
 
@@ -141,43 +118,43 @@ endpoint. The POST body is:
 sequenceDiagram
     actor UA as User A
     participant AA as Agent A
-    participant HSA as shadownet A
-    participant HSB as shadownet B
+    participant SA as Sidecar A
+    participant SB as Sidecar B
     participant AB as Agent B
     actor UB as User B
 
     UA->>AA: coordinate dinner with B
-    AA->>HSA: social_send coordination_request
-    HSA->>HSB: A2A HTTP JSON
-    AA-->>UA: Sent - I will let you know
+    AA->>SA: social_coordinate
+    SA->>SB: A2A HTTP POST
+    AA-->>UA: Sent! I'll let you know.
 
-    Note over HSB: Store interaction
-    HSB->>AB: Webhook a2a-negotiate deliver log
+    Note over SB: Webhook → a2a-negotiate (silent)
+    SB->>AB: deliver: log
+    Note over AB: Load profile, pick plan
+    AB->>SB: social_respond
+    SB->>SA: A2A HTTP POST (response)
 
-    Note over AB: Load user-profile skill and match calendars
-    AB->>HSB: social_respond response
-    HSB->>HSA: A2A HTTP JSON
+    Note over SA: Webhook → a2a-inbox (user-facing)
+    SA->>AA: deliver: auto
+    AA-->>UA: Coffee at The Daily Grind, Friday 10am. Confirm?
 
-    Note over HSA: Store interaction
-    HSA->>AA: Webhook a2a-inbox deliver auto
-    AA-->>UA: Coffee at Zazza Friday 10am - Confirm?
     UA->>AA: yes
+    AA->>SA: social_confirm_plan
+    SA->>SB: A2A HTTP POST (confirmation)
 
-    AA->>HSA: social_send confirmation
-    HSA->>HSB: A2A HTTP JSON
-    HSB->>AB: Webhook a2a-inbox deliver auto
-    AB-->>UB: Meghan wants to meet at Zazza Friday 10am - Accept?
+    SB->>AB: deliver: auto
+    AB-->>UB: Alice confirmed: Coffee Friday 10am. Accept?
     UB->>AB: yes
+    AB->>SB: social_accept_plan
+    SB->>SA: A2A HTTP POST (confirmed)
 
-    AB->>HSB: social_respond confirmed
-    HSB->>HSA: A2A HTTP JSON
-    HSA->>AA: Webhook a2a-inbox deliver auto
-    AA-->>UA: All set - Coffee Friday 10am at Zazza
+    SA->>AA: deliver: auto
+    AA-->>UA: All set! Coffee Friday 10am at The Daily Grind.
 ```
 
 ## Configuration
 
-All settings use the `SHADOWNET_` env prefix:
+All settings use the `SHADOWNET_` env prefix. See [`.env.example`](.env.example) for the full list.
 
 | Variable | Description |
 |----------|-------------|
@@ -185,25 +162,23 @@ All settings use the `SHADOWNET_` env prefix:
 | `AGENT_NAME` | Display name in agent card |
 | `OWNER_NAME` | Owner name in agent card |
 | `JWT_SECRET` | Secret for UI auth tokens |
-| `NOTIFICATION_WEBHOOK_URL` | Where to POST inbound message notifications |
-| `NOTIFICATION_WEBHOOK_SECRET` | HMAC-SHA256 secret for webhook signature |
-| `MCP_ENABLED` | Enable MCP server (default: true) |
-
-See [`.env.example`](.env.example) for all options.
+| `NOTIFICATION_WEBHOOK_URL` | Where to POST user-facing notifications |
+| `NOTIFICATION_NEGOTIATE_URL` | Where to POST autonomous negotiations (falls back to `WEBHOOK_URL`) |
+| `NOTIFICATION_WEBHOOK_SECRET` | HMAC-SHA256 shared secret for webhook signatures |
 
 ## Local Development
 
-Requires [uv](https://docs.astral.sh/uv/getting-started/installation/).
+Requires [uv](https://docs.astral.sh/uv/).
 
 ```bash
 # Backend
 cd backend
 uv sync --group dev
-cp .env.example .env       # then edit
+cp .env.example .env
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8340
 uv run uvicorn app.mcp_run:app --host 0.0.0.0 --port 8341
 
-# Frontend (separate terminal)
+# Frontend
 cd frontend
 npm ci
 npm run dev
@@ -215,4 +190,8 @@ uv run pytest tests/
 
 ## Architecture
 
-See [DESIGN.md](DESIGN.md) for the full architecture documentation.
+See [DESIGN.md](DESIGN.md) for internals.
+
+## License
+
+MIT

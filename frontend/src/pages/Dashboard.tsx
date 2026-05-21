@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { Users, MessageSquare, Shield } from "lucide-react";
+import { Users, MessageSquare, Shield, Fingerprint } from "lucide-react";
 
 export function DashboardPage() {
   const { userName } = useAuth();
@@ -34,8 +34,15 @@ export function DashboardPage() {
                     {c.name.charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-fg truncate">{c.name}</p>
-                    {c.label && <p className="text-[10px] text-muted">{c.label}</p>}
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm text-fg truncate">{c.name}</p>
+                      {c.did && <Fingerprint size={10} className="text-green-400 shrink-0" />}
+                    </div>
+                    {c.shadowname ? (
+                      <p className="text-[10px] text-accent/80 font-mono">@{c.shadowname}</p>
+                    ) : c.label ? (
+                      <p className="text-[10px] text-muted">{c.label}</p>
+                    ) : null}
                   </div>
                   <div className="flex items-center gap-1 text-[10px] text-muted">
                     <Shield size={10} /> {allowed ? "Allowed" : "Blocked"}

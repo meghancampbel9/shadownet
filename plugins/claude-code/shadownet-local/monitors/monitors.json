@@ -1,0 +1,7 @@
+[
+  {
+    "name": "shadownet-inbox",
+    "command": "curl -sN \"${SHADOWNET_LOCAL_URL:-http://localhost:8340}/v1/inbox/stream\"",
+    "description": "Streams new inbound A2A messages from shadownet-local as SSE events."
+  }
+]

@@ -1,17 +1,18 @@
 from __future__ import annotations
 
+import base64
 import logging
 from pathlib import Path
 
-from nacl.encoding import Base64Encoder
-from nacl.signing import SigningKey, VerifyKey
+from cryptography.hazmat.primitives import serialization
+from shadownet.crypto.ed25519 import Ed25519KeyPair
+from shadownet.did.key import derive_did_key
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_signing_key: SigningKey | None = None
-_verify_key: VerifyKey | None = None
+_keypair: Ed25519KeyPair | None = None
 
 
 def _identity_dir() -> Path:
@@ -19,7 +20,7 @@ def _identity_dir() -> Path:
 
 
 def init_identity() -> None:
-    global _signing_key, _verify_key
+    global _keypair
 
     identity_dir = _identity_dir()
     identity_dir.mkdir(parents=True, exist_ok=True)
@@ -28,42 +29,48 @@ def init_identity() -> None:
 
     if private_path.exists():
         raw = private_path.read_bytes()
-        _signing_key = SigningKey(raw)
+        _keypair = Ed25519KeyPair.from_seed(raw[:32])
         logger.info("Loaded existing Ed25519 identity")
     else:
-        _signing_key = SigningKey.generate()
-        private_path.write_bytes(bytes(_signing_key))
+        _keypair = Ed25519KeyPair.generate()
+        seed = _keypair.private_key.private_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PrivateFormat.Raw,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        private_path.write_bytes(seed)
         private_path.chmod(0o600)
         logger.info("Generated new Ed25519 identity")
 
-    _verify_key = _signing_key.verify_key
     public_path.write_text(get_public_key_b64())
 
 
-def get_signing_key() -> SigningKey:
-    if _signing_key is None:
+def get_keypair() -> Ed25519KeyPair:
+    if _keypair is None:
         raise RuntimeError("Identity not initialized — call init_identity() first")
-    return _signing_key
+    return _keypair
 
 
-def get_verify_key() -> VerifyKey:
-    if _verify_key is None:
-        raise RuntimeError("Identity not initialized — call init_identity() first")
-    return _verify_key
+def get_did() -> str:
+    return derive_did_key(get_keypair().public_bytes)
 
 
 def get_public_key_b64() -> str:
-    return get_verify_key().encode(encoder=Base64Encoder).decode()
+    return base64.b64encode(get_keypair().public_bytes).decode()
 
 
 def get_agent_card() -> dict:
-    """Return an A2A v1.0 compliant Agent Card."""
+    """Return an A2A + shadownet-local compliant Agent Card."""
     base_url = settings.external_url.rstrip("/")
 
     return {
         "name": settings.agent_name,
         "description": f"Agent-to-agent communication layer — owned by {settings.owner_name}",
         "version": "1.0.0",
+        "url": f"{base_url}/a2a",
+        "did": get_did(),
+        "publicKey": get_keypair().public_jwk(),
+        "shadownet:v": "0.1",
         "supportedInterfaces": [
             {
                 "url": f"{base_url}/a2a",
@@ -84,7 +91,7 @@ def get_agent_card() -> dict:
                 "httpAuthSecurityScheme": {
                     "scheme": "Bearer",
                     "bearerFormat": "JWT (EdDSA / Ed25519)",
-                    "description": "Short-lived JWT signed with the sender's Ed25519 key.",
+                    "description": ("DID-bound session token + Verifiable Presentation handshake."),
                 },
             },
         },

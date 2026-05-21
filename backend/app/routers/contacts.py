@@ -45,6 +45,9 @@ class ContactOut(BaseModel):
     name: str
     agent_endpoint: str
     agent_public_key: str
+    did: str
+    shadowname: str
+    public_key_jwk: str
     label: str
     notes: str
     metadata: dict
@@ -69,6 +72,9 @@ def _contact_to_out(contact: Contact, session: Session) -> ContactOut:
         name=contact.name,
         agent_endpoint=contact.agent_endpoint,
         agent_public_key=contact.agent_public_key,
+        did=contact.did,
+        shadowname=contact.shadowname,
+        public_key_jwk=contact.public_key_jwk,
         label=contact.label,
         notes=contact.notes,
         metadata=json.loads(contact.metadata_json),
@@ -123,10 +129,26 @@ async def add_contact(
     metadata_val = card.get("metadata", {})
     public_key = metadata_val.get("publicKey", "") if isinstance(metadata_val, dict) else ""
 
+    card_did = card.get("did", "")
+    card_public_key_jwk = json.dumps(card.get("publicKey", {})) if card.get("publicKey") else "{}"
+
+    a2a_url = ""
+    interfaces = card.get("supportedInterfaces", [])
+    if interfaces and isinstance(interfaces, list):
+        a2a_url = interfaces[0].get("url", "")
+    if not a2a_url:
+        a2a_url = card.get("url", "")
+    if a2a_url:
+        endpoint = a2a_url + "/message:send"
+    else:
+        endpoint = body.agent_endpoint.rstrip("/") + "/a2a/message:send"
+
     contact = Contact(
         name=display_name,
-        agent_endpoint=body.agent_endpoint,
+        agent_endpoint=endpoint,
         agent_public_key=public_key,
+        did=card_did,
+        public_key_jwk=card_public_key_jwk,
         label=body.label,
         notes=body.notes,
         metadata_json=json.dumps(body.metadata),
