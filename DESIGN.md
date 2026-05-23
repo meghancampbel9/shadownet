@@ -3,27 +3,26 @@
 ## Purpose
 
 Agent-to-agent communication sidecar implementing the Shadownet v0.1 protocol.
-Handles identity, transport, contacts, permissions, message storage, and webhook
-notifications. Never interprets message content — the host agent owns all
-business logic.
+Handles identity, transport, contacts, permissions, and message storage. Never
+interprets message content — the host agent owns all business logic.
 
 ## Architecture
 
 ```
-Host Agent ──MCP──► shadownet-local ──A2A HTTP──► Remote shadownet-local
-                         │
-                    ┌────┴────┐
-                    │ SQLite  │
-                    │ Ed25519 │
-                    │ Webhook │
-                    └─────────┘
+Host Agent ──MCP (Bearer auth)──► shadownet-local ──A2A HTTP──► Remote shadownet-local
+                                       │
+                                  ┌────┴────┐
+                                  │ SQLite  │
+                                  │ Ed25519 │
+                                  └─────────┘
 ```
 
 Each instance manages:
 - **Identity** — Ed25519 keypair → DID:key → agent card at `/.well-known/agent-card.json`
 - **Contact graph** — known peers with DID, endpoint, public key, grants
 - **Message store** — every inbound/outbound interaction persisted
-- **Webhook dispatch** — notifies host agent on inbound messages
+- **MCP endpoint** — authenticated tool surface at `/u/{shadowname}/mcp`
+- **Integration bundle** — RFC-0008 auto-discovery at `/v1/account/me/integration-bundle`
 
 ## Authentication
 
@@ -50,6 +49,11 @@ Uses `shadownet.a2a.client.build_handshake_headers` from the SDK:
 - Sets `audience` to the peer's DID
 - Includes `A2A-Version` header
 
+### MCP (agent connection)
+
+The host agent connects to `/u/{shadowname}/mcp` with a Bearer JWT token.
+The `BearerAuthMiddleware` validates the token before proxying to FastMCP.
+
 ## Message Flow
 
 ```
@@ -65,20 +69,11 @@ Inbound:
     → verify_inbound (SDK handshake check)
     → check grant (messaging permission)
     → extract envelope → store as inbound InteractionContext
-    → fire webhook notification to host agent
+    → signal inbox_wait subscribers
     → return 200 OK
 ```
 
-### Webhook Routing
-
-Inbound messages are routed to different webhook endpoints based on `data_type`:
-
-| data_type | Target | Reason |
-|-----------|--------|--------|
-| `coordination_request` | `NOTIFICATION_NEGOTIATE_URL` | Agent handles silently (autonomous negotiation) |
-| All others | `NOTIFICATION_WEBHOOK_URL` | Delivered to user's chat platform |
-
-Webhooks include HMAC-SHA256 signatures for verification.
+The host agent receives inbound messages by long-polling via `social_inbox_wait`.
 
 ## Data Model
 
@@ -118,10 +113,11 @@ backend/app/
 ├── grants.py            Grant enforcement + contact lookup by DID
 ├── identity.py          Ed25519 keypair + DID:key derivation + agent card
 ├── signing.py           SDK handshake init, verify_inbound, outbound headers
-├── notifications.py     Webhook dispatch with routing + HMAC signing
+├── connect.py           RFC-0008 integration bundle + connect pages
+├── mcp_auth.py          Bearer auth middleware for MCP endpoint
 ├── deps.py              Auth dependencies (UI sessions)
 ├── mcp_server.py        MCP tool definitions (social_* tools)
-├── mcp_run.py           MCP standalone HTTP runner
+├── mcp_run.py           MCP standalone HTTP runner (legacy port 8341)
 └── routers/
     ├── a2a.py           /a2a/message:send endpoint
     ├── auth.py          User auth (register/login)
@@ -129,10 +125,7 @@ backend/app/
     ├── interactions.py  Interaction list/detail API
     └── messages.py      Message history API
 
-skills/social/
-├── shadownet/SKILL.md               Base messaging skill
-└── shadownet-coordination/SKILL.md  Coordination flow skill
-
+plugins/claude-code/     Claude Code MCP config + skills
 frontend/                React + Vite management UI
 ```
 
@@ -166,8 +159,9 @@ message structure:
 
 ## Dependencies
 
-- `shadownet[fastapi]>=0.3.0` — Protocol SDK (DID, handshake, SNS, trust)
+- `shadownet[fastapi]>=0.3.0` — Protocol SDK (DID, handshake, SNS, trust, connect)
 - FastAPI + uvicorn — HTTP server
+- FastMCP — MCP server framework
 - SQLModel — ORM (SQLAlchemy + Pydantic)
 - httpx — Async HTTP client
 - cryptography — Ed25519 key management

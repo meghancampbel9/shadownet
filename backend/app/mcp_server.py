@@ -9,10 +9,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
-from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -21,11 +22,39 @@ from app.models import AccessGrant, Contact, InteractionContext, _utcnow
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("shadownet", stateless_http=True)
+
+def _build_allowed_hosts() -> list[str]:
+    """Derive allowed hosts from SHADOWNET_EXTERNAL_URL and container name."""
+    from urllib.parse import urlparse
+
+    hosts: list[str] = []
+    if settings.external_url:
+        parsed = urlparse(settings.external_url)
+        if parsed.hostname:
+            hosts.append(parsed.hostname)
+            if parsed.port:
+                hosts.append(f"{parsed.hostname}:{parsed.port}")
+    container_name = os.environ.get("SHADOWNET_CONTAINER_NAME", "")
+    if container_name:
+        hosts.append(container_name)
+        hosts.append(f"{container_name}:8340")
+    hosts.extend(["localhost", "localhost:8340"])
+    if not hosts:
+        hosts.append("localhost")
+    return hosts
+
+
+mcp = FastMCP(
+    "shadownet",
+    stateless_http=True,
+    json_response=True,
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=_build_allowed_hosts(),
+    ),
+)
 
 _inbox_event: asyncio.Event = asyncio.Event()
-
-_WEBHOOK_PERSIST_PATH = Path(settings.data_dir) / "webhook.json"
 
 
 def notify_inbox() -> None:
@@ -35,38 +64,6 @@ def notify_inbox() -> None:
 
 def _get_session() -> Session:
     return Session(engine)
-
-
-def _validate_webhook_url(url: str) -> str | None:
-    """Return error string if URL violates RFC-0007 constraints, else None."""
-    if not url:
-        return None
-    if url.startswith("https://"):
-        return None
-    if (
-        url.startswith("http://localhost")
-        or url.startswith("http://127.0.0.1")
-        or url.startswith("http://[::1]")
-    ):
-        return None
-    return "invalid_webhook_url: must be https:// or http://localhost/127.0.0.1/[::1]"
-
-
-def _persist_webhook(url: str, secret: str, events: list[str] | None) -> None:
-    """Persist webhook config to disk for replay after restart."""
-    _WEBHOOK_PERSIST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _WEBHOOK_PERSIST_PATH.write_text(json.dumps({"url": url, "secret": secret, "events": events}))
-
-
-def load_persisted_webhook() -> None:
-    """Restore webhook registration from disk at startup."""
-    if _WEBHOOK_PERSIST_PATH.exists():
-        try:
-            data = json.loads(_WEBHOOK_PERSIST_PATH.read_text())
-            settings.notification_webhook_url = data.get("url", "")
-            settings.notification_webhook_secret = data.get("secret", "")
-        except (json.JSONDecodeError, OSError):
-            pass
 
 
 # ── RFC-0007 Required Tools ────────────────────────────────────────────────
@@ -288,43 +285,6 @@ def social_grant(contactId: str, grant: str = "messaging", allowed: bool = True)
         return json.dumps({"ok": True})
 
 
-@mcp.tool()
-def social_set_webhook(url: str, secret: str, events: str = "[]") -> str:
-    """Register or update the webhook for inbox notifications.
-
-    To unregister, call with url="".
-    Secret must be at least 32 characters.
-
-    Args:
-        url: The webhook URL (https:// or http://localhost only). Empty to unregister.
-        secret: HMAC secret for signature verification (>=32 bytes).
-        events: JSON array of event types to subscribe to (default: all events).
-    """
-    if url == "":
-        settings.notification_webhook_url = ""
-        settings.notification_webhook_secret = ""
-        _persist_webhook("", "", None)
-        return json.dumps({"ok": True})
-
-    url_err = _validate_webhook_url(url)
-    if url_err:
-        return json.dumps({"error": url_err})
-
-    if len(secret) < 32:
-        return json.dumps({"error": "secret must be at least 32 bytes"})
-
-    try:
-        event_list = json.loads(events) if events else None
-    except (json.JSONDecodeError, TypeError):
-        event_list = None
-
-    settings.notification_webhook_url = url
-    settings.notification_webhook_secret = secret
-    _persist_webhook(url, secret, event_list)
-
-    return json.dumps({"ok": True})
-
-
 # ── Messaging Tools ────────────────────────────────────────────────────────
 
 _COORDINATION_KEYWORDS = frozenset(
@@ -411,18 +371,18 @@ def _enrich_confirmation(payload: dict, contact_id: str, session: Session) -> di
 @mcp.tool()
 def social_send(
     contactId: str,
-    payload: str,
+    payload: str | dict = "",
     interaction: str = "",
     intentId: str = "",
 ) -> str:
     """Send a Shadownet-enveloped message over A2A.
 
-    After sending, END your turn. A webhook or inbox_wait will notify you
+    After sending, END your turn. The inbox_wait loop will notify you
     when the other agent replies.
 
     Args:
         contactId: The contact to send to (from social_contacts).
-        payload: The message payload as a JSON object string.
+        payload: The message payload (JSON string or dict).
         interaction: Optional interaction URI (must start with urn:). Omit for free-form.
         intentId: Optional existing intent ID. New intent created if absent.
     """
@@ -433,10 +393,13 @@ def social_send(
 
         from app.executor import build_envelope, send_a2a_message
 
-        try:
-            payload_obj = json.loads(payload)
-        except (json.JSONDecodeError, TypeError):
-            payload_obj = {"text": payload}
+        if isinstance(payload, dict):
+            payload_obj = payload
+        else:
+            try:
+                payload_obj = json.loads(payload)
+            except (json.JSONDecodeError, TypeError):
+                payload_obj = {"text": payload}
 
         data_type = payload_obj.get("type", "message")
         data_type = _normalize_data_type(data_type, payload_obj)
@@ -548,6 +511,9 @@ async def social_inbox_wait(timeout_seconds: int = 30, last_event_id: str = "") 
                 cutoff_ts = datetime.fromisoformat(last_event_id).timestamp()
             except ValueError:
                 pass
+    else:
+        # No cursor → start from "now" (don't replay historical messages)
+        cutoff_ts = time.time()
 
     while time.time() < deadline:
         with _get_session() as session:
@@ -567,14 +533,34 @@ async def social_inbox_wait(timeout_seconds: int = 30, last_event_id: str = "") 
                 high_water: float = 0
                 for i in interactions:
                     ts = i.created_at.timestamp()
+                    contact = session.get(Contact, i.contact_id)
+                    sender = "unknown"
+                    if contact:
+                        sender = contact.shadowname or contact.name or "unknown"
+                    ctx_data = {}
+                    try:
+                        ctx_data = json.loads(i.context_data or "{}")
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                    body = (
+                        ctx_data.get("body")
+                        or ctx_data.get("text")
+                        or ctx_data.get("proposal")
+                        or ""
+                    )
+                    if not body and ctx_data:
+                        body = json.dumps(ctx_data)
                     events.append(
                         {
                             "event_id": str(ts),
                             "event": "inbox.message",
                             "occurredAt": int(ts),
                             "data": {
-                                "intentId": i.intent_id or f"urn:uuid:{i.id}",
+                                "intentId": (i.intent_id or f"urn:uuid:{i.id}"),
                                 "contactId": i.contact_id,
+                                "from": sender,
+                                "body": body,
+                                "data_type": i.data_type,
                                 "interaction": "",
                                 "messageId": i.id,
                             },

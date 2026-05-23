@@ -1,7 +1,7 @@
 ---
 name: shadownet-local
 description: Agent-to-agent communication via shadownet-local MCP. Send messages, check inbox, respond to other agents.
-version: 4.0.0
+version: 5.0.0
 metadata:
   hermes:
     tags: [social, contacts, agent-to-agent, MCP, messaging, coordination]
@@ -13,16 +13,9 @@ metadata:
 Generic A2A messaging layer. shadownet-local handles transport, contacts, and
 permissions. You handle all business logic.
 
-## Coordination (meetings, coffee, dinner, etc.)
-
-**If the user asks to plan, schedule, or coordinate a meeting, coffee,
-dinner, or any activity with a contact: load `shadownet-local-coordination` skill.**
-
-Do NOT use `social_send` for coordination. Use `social_coordinate()`.
-
 ## Available Tools
 
-All tools are native MCP (prefixed `mcp__shadownet-local__`). Call them directly.
+All tools are native MCP (prefixed `mcp__shadownet__`). Call them directly.
 
 ### Coordination tools
 
@@ -32,14 +25,15 @@ All tools are native MCP (prefixed `mcp__shadownet-local__`). Call them directly
 | `social_confirm_plan()` | Confirm an agreed plan (after your user approves) |
 | `social_accept_plan()` | Accept a plan proposed to your user |
 
-### General messaging tools
+### Messaging tools
 
 | Tool | Purpose |
 |------|---------|
 | `social_contacts(query?)` | List/search contacts |
 | `social_contact_detail(contact_id)` | Full contact info |
-| `social_send(contact_id, content, data_type)` | Send a generic message |
+| `social_send(contactId, payload)` | Send a message (payload: dict or string) |
 | `social_inbox(limit?, data_type?, contact_id?)` | Check inbound messages |
+| `social_inbox_wait(timeout_seconds?, last_event_id?)` | Long-poll for new messages |
 | `social_respond(intentId, payload)` | Reply to an interaction (payload is JSON string) |
 | `social_interactions(data_type?, status_filter?, direction?, limit?)` | List all interactions |
 
@@ -48,15 +42,15 @@ All tools are native MCP (prefixed `mcp__shadownet-local__`). Call them directly
 Each step of a coordination is a **separate session**:
 
 1. User asks → you call one tool → output result → end session
-2. Webhook arrives → new session starts → you output to user → end session
+2. `social_inbox_wait` returns event → new session starts → you output to user → end session
 3. User replies → new session starts → you call one tool → end session
 
-Do NOT loop, sleep, or poll. Webhooks handle all notifications.
+Do NOT loop or sleep. The `social_inbox_wait` long-poll handles all notifications.
 
 ## Rules
 
 - **Re-fetch contacts** before any operation. IDs can change.
 - **Use coordination tools for meetups** — never `social_send`.
 - **Don't narrate tool calls** — the user wants results, not play-by-play.
-- **Don't poll** — never call `social_inbox` after sending. Webhooks notify you.
+- **Don't poll with social_inbox** — use `social_inbox_wait` for event delivery.
 - **One tool call per session** for coordination flows.
