@@ -6,11 +6,11 @@ Instructions for AI coding assistants working on this codebase.
 
 A single-tenant, self-hosted **Sidecar** implementing the Shadownet v0.1 protocol.
 It sits between a host agent (Hermes, Claude Code, or any MCP-compatible framework)
-and the network, handling identity, transport, contacts, permissions, message
-storage, and webhook notifications.
+and the network, handling identity, transport, contacts, permissions, and message
+storage.
 
-The host agent owns all business logic. This sidecar never interprets message
-content — it only routes, stores, and authenticates.
+The host agent connects via the plugin model (long-poll MCP with Bearer auth).
+This sidecar never interprets message content — it only routes, stores, and authenticates.
 
 ## Architecture
 
@@ -21,13 +21,13 @@ content — it only routes, stores, and authenticates.
 │  ┌───────────────────┐    ┌───────────────────┐  │
 │  │ shadownet         │    │ shadownet-test    │  │
 │  │ Port: 8340 (API)  │    │ Port: 8350 (API)  │  │
-│  │ Port: 8341 (MCP)  │    │ Port: 8351 (MCP)  │  │
+│  │ /u/{name}/mcp     │    │ /u/{name}/mcp     │  │
 │  └────────┬──────────┘    └────────┬──────────┘  │
-│           │ webhook                │ webhook      │
+│           │ long-poll             │ long-poll     │
 │           ▼                        ▼              │
 │  ┌───────────────────┐    ┌───────────────────┐  │
 │  │ Host Agent A      │    │ Host Agent B      │  │
-│  │ (webhook port)    │    │ (webhook port)    │  │
+│  │ (plugin)          │    │ (plugin)          │  │
 │  └───────────────────┘    └───────────────────┘  │
 └───────────────────────────────────────────────────┘
 ```
@@ -47,10 +47,11 @@ backend/app/
 ├── grants.py            Grant enforcement + contact lookup
 ├── identity.py          Ed25519 keypair + DID + agent card
 ├── signing.py           SDK handshake verification + outbound headers
-├── notifications.py     Webhook dispatch (routing by data_type)
+├── connect.py           RFC-0008 integration bundle + connect pages
+├── mcp_auth.py          Bearer auth middleware for /u/{name}/mcp
 ├── deps.py              Auth dependencies
 ├── mcp_server.py        MCP tool definitions (all social_* tools)
-├── mcp_run.py           MCP standalone runner
+├── mcp_run.py           MCP standalone runner (port 8341, legacy)
 └── routers/
     ├── a2a.py           A2A HTTP endpoints (/a2a/message:send)
     ├── auth.py          User auth (register/login)
@@ -58,25 +59,20 @@ backend/app/
     ├── interactions.py  Interaction list/detail
     └── messages.py      Message history
 
-skills/social/
-├── shadownet/SKILL.md               Base skill (identity, contacts, messaging)
-└── shadownet-coordination/SKILL.md  Coordination skill (negotiate, confirm, accept)
-
 frontend/src/                        React + Vite UI
+plugins/claude-code/                 Claude Code MCP config + skills
 ```
 
 ## Key Concepts
 
-### Webhook Routing
+### Agent Connection
 
-Inbound messages are routed to different host agent webhook endpoints based on `data_type`:
+Agents connect to the sidecar via the authenticated MCP endpoint at
+`/u/{shadowname}/mcp` using a Bearer JWT token. The agent uses `social_inbox_wait`
+for long-polling inbound messages.
 
-| data_type | Webhook route | deliver mode | Purpose |
-|-----------|---------------|--------------|---------|
-| `coordination_request` | `a2a-negotiate` | `log` (silent) | Agent handles autonomously |
-| Everything else | `a2a-inbox` | `auto` (user-facing) | Delivered to user's chat |
-
-Config vars: `NOTIFICATION_WEBHOOK_URL` (a2a-inbox), `NOTIFICATION_NEGOTIATE_URL` (a2a-negotiate).
+The integration bundle endpoint (`/v1/account/me/integration-bundle`) provides
+all config needed for plugin auto-discovery (RFC-0008).
 
 ### MCP Tools
 
@@ -86,8 +82,9 @@ Config vars: `NOTIFICATION_WEBHOOK_URL` (a2a-inbox), `NOTIFICATION_NEGOTIATE_URL
 | `social_respond` | `(intentId, payload)` | Reply to an interaction (payload is JSON string) |
 | `social_confirm_plan` | `()` | Confirm a proposed plan (finds latest pending automatically) |
 | `social_accept_plan` | `()` | Accept a confirmed plan (finds latest pending automatically) |
-| `social_send` | `(contact_id, content, data_type)` | Send a generic message |
+| `social_send` | `(contactId, payload)` | Send a message (payload: dict or str) |
 | `social_inbox` | `(limit, data_type, contact_id)` | List inbound messages |
+| `social_inbox_wait` | `(timeout_seconds, last_event_id)` | Long-poll for new messages |
 | `social_contacts` | `(query)` | List/search contacts |
 | `social_contact_detail` | `(contact_id)` | Get contact details |
 | `social_interactions` | `(data_type, status_filter, direction, limit)` | List interactions |
@@ -117,30 +114,27 @@ Step 1: User A → Agent A: "coordinate dinner with B"
         Agent A calls social_coordinate(contactId, activity, details)
         Sidecar A → Sidecar B: coordination_request
 
-Step 2: Sidecar B → Agent B (webhook: a2a-negotiate, deliver: log)
-        Agent B loads user-profile skill, picks plan
+Step 2: Sidecar B → Agent B (via inbox_wait event)
+        Agent B loads coordination skill, picks plan
         Agent B calls social_respond(intentId, payload='{"type":"response","status":"agreed","plan":{...}}')
         Sidecar B → Sidecar A: response
 
-Step 3: Sidecar A → Agent A (webhook: a2a-inbox, deliver: auto)
+Step 3: Sidecar A → Agent A (via inbox_wait event)
         Agent A outputs plan summary to User A: "Coffee Friday 10am at The Daily Grind. Confirm?"
-        (one-shot session, no tools called)
 
 Step 4: User A → Agent A: "yes"
         Agent A calls social_confirm_plan() [no args needed]
         Sidecar A → Sidecar B: confirmation
 
-Step 5: Sidecar B → Agent B (webhook: a2a-inbox, deliver: auto)
+Step 5: Sidecar B → Agent B (via inbox_wait event)
         Agent B outputs to User B: "A confirmed: Coffee Friday 10am. Accept?"
-        (one-shot session, no tools called)
 
 Step 6: User B → Agent B: "yes"
         Agent B calls social_accept_plan() [no args needed]
         Sidecar B → Sidecar A: confirmed
 
-Step 7: Sidecar A → Agent A (webhook: a2a-inbox, deliver: auto)
+Step 7: Sidecar A → Agent A (via inbox_wait event)
         Agent A outputs to User A: "All set! Coffee Friday 10am at The Daily Grind."
-        (one-shot session, no tools called)
 ```
 
 ## Development
@@ -150,7 +144,6 @@ cd backend
 uv sync --group dev
 cp .env.example .env  # then edit
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8340
-uv run uvicorn app.mcp_run:app --host 0.0.0.0 --port 8341
 
 # Frontend (separate terminal)
 cd frontend && npm ci && npm run dev
@@ -164,15 +157,10 @@ cd backend && uv run pytest tests/
 
 ## Deployment
 
-Use `deploy.sh` (gitignored — copy from [`deploy.sh.example`](deploy.sh.example) and customize).
-A deploy script should:
+Use `deploy.sh` to sync and restart containers on the target host. A deploy:
 
-1. Rsync source to the target host
-2. Sync skills to host agent containers
-3. Build and restart sidecar containers
-4. Wipe agent memory + sessions (prevents stale tool-failure beliefs)
-5. Clear `interaction_contexts` tables (clean coordination state)
-6. Restart host agent gateways
+1. Rsyncs source to the target host (excluding .env, data, node_modules)
+2. Builds and restarts sidecar containers via docker compose
 
 ## E2E Testing (Social Coordination)
 
@@ -185,45 +173,21 @@ CLI (e.g., `hermes chat -q "..." -Q --yolo`). No messaging platform needed.
 # Step 1: Initiator sends coordination request
 docker exec <agent-b> hermes chat -q "coordinate drinks with <contact> friday" -Q --yolo --max-turns 5
 
-# Verify: check sidecar-a logs for type=coordination_request
-docker logs <sidecar-a> --since='1m ago' | grep 'A2A message:send'
-
 # Wait ~15s for autonomous negotiation (Step 2)
 
-# Verify: check sidecar-b logs for type=response received
-docker logs <sidecar-b> --since='2m ago' | grep 'A2A message:send'
+# Verify: check sidecar DB for interactions
+docker exec <sidecar-a> python3 -c "
+import sqlite3; c=sqlite3.connect('/app/data/shadownet.db')
+for r in c.execute('SELECT data_type, direction, status FROM interaction_contexts ORDER BY created_at DESC LIMIT 6').fetchall():
+    print(r)
+c.close()
+"
 
 # Step 4: User confirms
-docker exec <agent-b> hermes chat -q "yes confirm it" -Q --yolo --max-turns 5
+docker exec <agent-a> hermes chat -q "yes confirm it" -Q --yolo --max-turns 5
 
 # Step 6: Receiver accepts
-docker exec <agent-a> hermes chat -q "yes accept" -Q --yolo --max-turns 5
-```
-
-### Database Verification
-
-```bash
-docker exec <sidecar> python3 -c "
-import sqlite3
-conn = sqlite3.connect('/app/data/shadownet.db')
-rows = conn.execute('SELECT data_type, direction, status FROM interaction_contexts ORDER BY created_at DESC LIMIT 6').fetchall()
-for r in rows: print(r)
-conn.close()
-"
-```
-
-Expected chain on initiator sidecar:
-```
-('coordination_request', 'outbound', 'sent')
-('response', 'inbound', 'responded')
-('confirmation', 'outbound', 'sent')
-```
-
-Expected on receiver sidecar:
-```
-('coordination_request', 'inbound', 'responded')
-('response', 'outbound', 'sent')
-('confirmation', 'inbound', 'received')
+docker exec <agent-b> hermes chat -q "yes accept" -Q --yolo --max-turns 5
 ```
 
 ### Reset State Between Tests
@@ -231,9 +195,6 @@ Expected on receiver sidecar:
 ```bash
 # Clear interaction history
 docker exec <sidecar> python3 -c "import sqlite3; c=sqlite3.connect('/app/data/shadownet.db'); c.execute('DELETE FROM interaction_contexts'); c.commit(); c.close()"
-
-# Wipe agent memory + sessions (prevents stale beliefs)
-docker exec <agent> sh -c 'echo "" > /opt/data/memories/MEMORY.md; rm -f /opt/data/sessions/session_*.json; echo "{}" > /opt/data/sessions/sessions.json'
 ```
 
 ## Common Failures
@@ -241,26 +202,23 @@ docker exec <agent> sh -c 'echo "" > /opt/data/memories/MEMORY.md; rm -f /opt/da
 | Symptom | Check | Fix |
 |---------|-------|-----|
 | 401 on A2A send | Sidecar logs for `PresentationRequired` | Contact missing `did` in DB |
-| Agent says "coordination failed" | Check if skill loaded in session | Wipe MEMORY.md, ensure skills synced |
-| Webhook 401 | Sidecar logs for HTTP 401 on POST | Secret mismatch between .env and agent config |
+| Agent says "coordination failed" | Check if plugin connected | Verify `SHADOWNET_TOKEN` and MCP endpoint |
 | `social_confirm_plan` fails | Query `interaction_contexts` for `data_type='response', status='received'` | Payload missing `"type": "response"` |
-| Agent loops/polls | Session shows `social_inbox` calls | Stale memory. Wipe and restart gateway. |
 | "Instance not bound to Session" | SQLAlchemy detached error in logs | ORM object accessed outside `with _get_session()` |
-| Gateway not running | `hermes status` | `hermes gateway stop; hermes gateway run --replace` |
 
 ## Known Constraints
 
 - **No SCA infrastructure yet** — VP auth bypassed for known contacts via `_TrustedCache`
-- **One-shot webhook sessions** — `deliver: auto` cannot call tools or wait for input
-- **LLM non-determinism** — Agents may misinterpret. Wipe memory for clean state.
+- **LLM non-determinism** — Agents may misinterpret tool outputs
 - **Auto-resolving tools** — `social_confirm_plan()` and `social_accept_plan()` find the most recent pending interaction when called with no arguments
 - **Envelope format** — `{"message": {"role": "ROLE_AGENT", "parts": [{"type": "data", "data": {...}}]}}` wrapping `shadownet/v1+envelope`
 
 ## Dependencies
 
-- `shadownet[fastapi]>=0.3.0` — Protocol SDK (DID, handshake, SNS, trust)
+- `shadownet[fastapi]>=0.3.0` — Protocol SDK (DID, handshake, SNS, trust, connect)
 - FastAPI + uvicorn
 - SQLModel (SQLAlchemy + Pydantic)
 - httpx (async HTTP client)
+- FastMCP (MCP server framework)
 
 See `backend/pyproject.toml` for the full list.

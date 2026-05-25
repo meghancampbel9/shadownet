@@ -25,13 +25,17 @@ async def lifespan(app: FastAPI):
     init_db()
     init_identity()
 
-    from app.mcp_server import load_persisted_webhook
+    from app.config import validate_shadowname_at_startup
+    from app.mcp_auth import mcp_lifespan
     from app.signing import init_protocol
 
     init_protocol()
-    load_persisted_webhook()
+    validate_shadowname_at_startup()
     logger.info("Agent card (A2A v1.0): %s/.well-known/agent-card.json", settings.external_url)
-    yield
+
+    async with mcp_lifespan():
+        yield
+
     logger.info("shadownet shutting down")
 
 
@@ -53,7 +57,6 @@ app.add_middleware(
 
 # ── Routers ────────────────────────────────────────────────────────────────
 
-from app.inbox_stream import router as inbox_stream_router  # noqa: E402
 from app.routers.a2a import router as a2a_router  # noqa: E402
 from app.routers.auth import router as auth_router  # noqa: E402
 from app.routers.contacts import router as contacts_router  # noqa: E402
@@ -65,7 +68,11 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(contacts_router, prefix="/api")
 app.include_router(interactions_router, prefix="/api")
 app.include_router(messages_router, prefix="/api")
-app.include_router(inbox_stream_router)
+
+# RFC-0008 onboarding surface (integration-bundle, /connect pages)
+from app.connect import get_connect_router  # noqa: E402
+
+app.include_router(get_connect_router())
 
 # ── Health ─────────────────────────────────────────────────────────────────
 
@@ -81,6 +88,17 @@ def health():
         "did": get_did(),
         "public_key": get_public_key_b64(),
     }
+
+
+# ── Authenticated MCP (RFC-0007 per-tenant endpoint) ──────────────────────
+
+from app.mcp_auth import get_authenticated_mcp_app  # noqa: E402
+
+_mcp_mount_path = f"/u/{settings.shadowname}" if settings.shadowname else ""
+if _mcp_mount_path:
+    app.mount(_mcp_mount_path, get_authenticated_mcp_app())
+else:
+    app.mount("/mcp-auth", get_authenticated_mcp_app())
 
 
 # ── SPA static files (must be last) ───────────────────────────────────────
