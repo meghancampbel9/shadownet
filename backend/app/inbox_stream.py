@@ -1,9 +1,9 @@
 """SSE stream of newly stored inbound A2A messages.
 
-Alternative to the outbound webhook for host agents that prefer to pull
-events (e.g. a Claude Code background monitor running ``curl -N``) instead
-of exposing an HTTP receiver. Both delivery paths fire from
-``notify_message_received`` so the webhook and the stream stay in sync.
+Provides an event stream for host agents that prefer to pull events
+(e.g. a Claude Code background monitor running ``curl -N``) instead of
+polling ``social_inbox_wait``.  Events are published from
+``executor.handle_inbound`` after each inbound message is stored.
 """
 
 from __future__ import annotations

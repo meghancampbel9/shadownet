@@ -3,9 +3,8 @@
 ## Purpose
 
 Agent-to-agent communication sidecar implementing the Shadownet v0.1 protocol.
-Handles identity, transport, contacts, permissions, message storage, and webhook
-notifications. Never interprets message content — the host agent owns all
-business logic.
+Handles identity, transport, contacts, permissions, and message storage.
+Never interprets message content — the host agent owns all business logic.
 
 ## Architecture
 
@@ -15,7 +14,6 @@ Host Agent ──MCP──► shadownet-local ──A2A HTTP──► Remote sha
                     ┌────┴────┐
                     │ SQLite  │
                     │ Ed25519 │
-                    │ Webhook │
                     └─────────┘
 ```
 
@@ -23,7 +21,7 @@ Each instance manages:
 - **Identity** — Ed25519 keypair → DID:key → agent card at `/.well-known/agent-card.json`
 - **Contact graph** — known peers with DID, endpoint, public key, grants
 - **Message store** — every inbound/outbound interaction persisted
-- **Webhook dispatch** — notifies host agent on inbound messages
+- **Inbox notification** — host agent receives inbound messages via MCP long-poll or SSE stream
 
 ## Authentication
 
@@ -65,20 +63,9 @@ Inbound:
     → verify_inbound (SDK handshake check)
     → check grant (messaging permission)
     → extract envelope → store as inbound InteractionContext
-    → fire webhook notification to host agent
+    → signal inbox event (unblocks social_inbox_wait + SSE stream)
     → return 200 OK
 ```
-
-### Webhook Routing
-
-Inbound messages are routed to different webhook endpoints based on `data_type`:
-
-| data_type | Target | Reason |
-|-----------|--------|--------|
-| `coordination_request` | `NOTIFICATION_NEGOTIATE_URL` | Agent handles silently (autonomous negotiation) |
-| All others | `NOTIFICATION_WEBHOOK_URL` | Delivered to user's chat platform |
-
-Webhooks include HMAC-SHA256 signatures for verification.
 
 ## Data Model
 
@@ -118,7 +105,7 @@ backend/app/
 ├── grants.py            Grant enforcement + contact lookup by DID
 ├── identity.py          Ed25519 keypair + DID:key derivation + agent card
 ├── signing.py           SDK handshake init, verify_inbound, outbound headers
-├── notifications.py     Webhook dispatch with routing + HMAC signing
+├── inbox_stream.py      SSE event stream for inbound messages
 ├── deps.py              Auth dependencies (UI sessions)
 ├── mcp_server.py        MCP tool definitions (social_* tools)
 ├── mcp_run.py           MCP standalone HTTP runner

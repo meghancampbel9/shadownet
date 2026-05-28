@@ -18,7 +18,23 @@ services:
       - "8341"
     labels:
       - traefik.enable=true
+      # SDK user-scoped MCP path /u/{shadowname}/mcp → rewrite to /mcp, port 8341
+      - traefik.http.routers.shadownet-mcp-user.rule=Host(`shadownet.${TRAEFIK_HOST}`) && PathRegexp(`/u/[^/]+/mcp`)
+      - traefik.http.routers.shadownet-mcp-user.entrypoints=websecure
+      - traefik.http.routers.shadownet-mcp-user.tls.certresolver=letsencrypt
+      - traefik.http.routers.shadownet-mcp-user.service=shadownet-mcp
+      - traefik.http.routers.shadownet-mcp-user.middlewares=shadownet-mcp-rewrite
+      - traefik.http.middlewares.shadownet-mcp-rewrite.replacepathregex.regex=^/u/[^/]+/mcp$$
+      - traefik.http.middlewares.shadownet-mcp-rewrite.replacepathregex.replacement=/mcp
+      # Direct MCP endpoint /mcp → port 8341
+      - traefik.http.routers.shadownet-mcp.rule=Host(`shadownet.${TRAEFIK_HOST}`) && PathPrefix(`/mcp`)
+      - traefik.http.routers.shadownet-mcp.entrypoints=websecure
+      - traefik.http.routers.shadownet-mcp.tls.certresolver=letsencrypt
+      - traefik.http.routers.shadownet-mcp.service=shadownet-mcp
+      - traefik.http.services.shadownet-mcp.loadbalancer.server.port=8341
+      # Everything else → port 8340
       - traefik.http.routers.shadownet.rule=Host(`shadownet.${TRAEFIK_HOST}`)
       - traefik.http.routers.shadownet.entrypoints=websecure
       - traefik.http.routers.shadownet.tls.certresolver=letsencrypt
+      - traefik.http.routers.shadownet.service=shadownet
       - traefik.http.services.shadownet.loadbalancer.server.port=8340

@@ -16,7 +16,7 @@ from shadownet.a2a.errors import (
     PresentationInvalidError,
     PresentationRequiredError,
 )
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.database import get_session
 from app.executor import extract_data_part, handle_inbound, task_response
@@ -153,54 +153,6 @@ async def a2a_cancel_task(task_id: str, request: Request, session: Session = Dep
     session.commit()
 
     return task_response(ictx.id, "TASK_STATE_CANCELED")
-
-
-# ── Webhook (receiving push notifications from remote agents) ──────────────
-
-
-@router.post("/a2a/webhook")
-async def a2a_webhook(request: Request, session: Session = Depends(get_session)):
-    body = await request.json()
-    logger.info("A2A webhook received: %s", json.dumps(body)[:500])
-
-    status_update = body.get("statusUpdate")
-    if status_update:
-        remote_task_id = status_update.get("taskId")
-        new_status = status_update.get("status", {})
-        state = new_status.get("state", "")
-
-        ictx = None
-        if remote_task_id:
-            ictx = session.exec(
-                select(InteractionContext)
-                .where(InteractionContext.context_data.contains(remote_task_id))
-                .order_by(InteractionContext.created_at.desc())
-            ).first()
-
-        if ictx:
-            if state in ("TASK_STATE_COMPLETED",):
-                ictx.status = "completed"
-            elif state in ("TASK_STATE_CANCELED",):
-                ictx.status = "cancelled"
-            elif state in ("TASK_STATE_FAILED",):
-                ictx.status = "failed"
-
-            ictx.updated_at = datetime.now(timezone.utc)
-            session.add(ictx)
-            session.commit()
-
-            from app.models import Contact
-            from app.notifications import notify_interaction_updated
-
-            contact = session.get(Contact, ictx.contact_id) if ictx.contact_id else None
-            if contact:
-                await notify_interaction_updated(contact, ictx.id, ictx.status)
-
-            logger.info("Webhook updated interaction %s to %s", ictx.id, ictx.status)
-        else:
-            logger.warning("Webhook: no matching interaction for task_id=%s", remote_task_id)
-
-    return {"received": True}
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────

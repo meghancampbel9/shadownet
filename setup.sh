@@ -45,8 +45,7 @@ prompt OWNER_NAME   "Owner name"                   "$(whoami)"
 
 # ── Generate secrets ──────────────────────────────────────────────────
 JWT_SECRET=$(openssl rand -hex 32)
-WEBHOOK_SECRET=$(openssl rand -hex 32)
-ok "Generated JWT and webhook secrets"
+ok "Generated JWT secret"
 
 # ── Detect agent Docker network ──────────────────────────────────────
 info "Looking for agent Docker networks..."
@@ -62,15 +61,6 @@ else
   warn "No Docker networks found."
   prompt AGENT_NETWORK "Docker network name (leave empty to create a new one)" "agent-network"
 fi
-
-# ── Webhook configuration ─────────────────────────────────────────────
-echo ""
-info "Webhook configuration (optional)"
-echo "  If your agent runs in Docker on the same network,"
-echo "  shadownet can notify it when A2A messages arrive."
-echo "  Example: http://<agent-container>:8644/webhooks/a2a-inbox"
-echo ""
-prompt WEBHOOK_URL "Notification webhook URL (leave empty to skip)" ""
 
 # ── Write .env ────────────────────────────────────────────────────────
 cat > .env << EOF
@@ -89,10 +79,6 @@ SHADOWNET_JWT_SECRET=$JWT_SECRET
 
 # Docker networking
 AGENT_NETWORK=$AGENT_NETWORK
-
-# Webhook notifications to host agent
-SHADOWNET_NOTIFICATION_WEBHOOK_URL=$WEBHOOK_URL
-SHADOWNET_NOTIFICATION_WEBHOOK_SECRET=$WEBHOOK_SECRET
 EOF
 
 ok "Wrote .env"
@@ -121,12 +107,7 @@ echo "Next steps:"
 echo "  1. Open $EXTERNAL_URL and create an account"
 echo "  2. Add contacts (other shadownet instances)"
 echo "  3. Install agent skills: cp -r skills/social/ ~/.hermes/skills/social/"
-echo "  4. Configure your agent's webhook routes (see agent-config.example.yaml)"
+echo "  4. Configure your agent's MCP server (see plugins/README.md)"
 echo ""
-if [ -n "$WEBHOOK_URL" ]; then
-  echo "  Webhook secret (add to your agent's config.yaml route):"
-  echo "    $WEBHOOK_SECRET"
-  echo ""
-fi
 echo "  For Traefik: docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d"
 echo "  For testing: docker compose -f docker-compose.yml -f docker-compose.test.yml up -d"

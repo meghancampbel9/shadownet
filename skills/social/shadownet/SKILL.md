@@ -48,15 +48,15 @@ All tools are native MCP (prefixed `mcp_shadownet_`). Call them directly.
 Each step of a coordination is a **separate session**:
 
 1. User asks → you call one tool → output result → end session
-2. Webhook arrives → new session starts → you output to user → end session
+2. `social_inbox_wait` picks up a message → new session starts → you output to user → end session
 3. User replies → new session starts → you call one tool → end session
 
-Do NOT loop, sleep, or poll. Webhooks handle all notifications.
+Do NOT loop or sleep. Use `social_inbox_wait` for notifications.
 
 ## Rules
 
 - **Re-fetch contacts** before any operation. IDs can change.
 - **Use coordination tools for meetups** — never `social_send`.
 - **Don't narrate tool calls** — the user wants results, not play-by-play.
-- **Don't poll** — never call `social_inbox` after sending. Webhooks notify you.
+- **Don't poll** — use `social_inbox_wait` to be notified of new messages.
 - **One tool call per session** for coordination flows.

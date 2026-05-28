@@ -6,8 +6,8 @@ Instructions for AI coding assistants working on this codebase.
 
 A single-tenant, self-hosted **Sidecar** implementing the Shadownet v0.1 protocol.
 It sits between a host agent (Hermes, Claude Code, or any MCP-compatible framework)
-and the network, handling identity, transport, contacts, permissions, message
-storage, and webhook notifications.
+and the network, handling identity, transport, contacts, permissions, and message
+storage.
 
 The host agent owns all business logic. This sidecar never interprets message
 content — it only routes, stores, and authenticates.
@@ -23,11 +23,11 @@ content — it only routes, stores, and authenticates.
 │  │ Port: 8340 (API)  │    │ Port: 8350 (API)  │  │
 │  │ Port: 8341 (MCP)  │    │ Port: 8351 (MCP)  │  │
 │  └────────┬──────────┘    └────────┬──────────┘  │
-│           │ webhook                │ webhook      │
+│           │ MCP                    │ MCP          │
 │           ▼                        ▼              │
 │  ┌───────────────────┐    ┌───────────────────┐  │
 │  │ Host Agent A      │    │ Host Agent B      │  │
-│  │ (webhook port)    │    │ (webhook port)    │  │
+│  │ (MCP client)      │    │ (MCP client)      │  │
 │  └───────────────────┘    └───────────────────┘  │
 └───────────────────────────────────────────────────┘
 ```
@@ -47,7 +47,7 @@ backend/app/
 ├── grants.py            Grant enforcement + contact lookup
 ├── identity.py          Ed25519 keypair + DID + agent card
 ├── signing.py           SDK handshake verification + outbound headers
-├── notifications.py     Webhook dispatch (routing by data_type)
+├── inbox_stream.py      SSE event stream for inbound messages
 ├── deps.py              Auth dependencies
 ├── mcp_server.py        MCP tool definitions (all social_* tools)
 ├── mcp_run.py           MCP standalone runner
@@ -67,16 +67,11 @@ frontend/src/                        React + Vite UI
 
 ## Key Concepts
 
-### Webhook Routing
+### Inbound Notification
 
-Inbound messages are routed to different host agent webhook endpoints based on `data_type`:
-
-| data_type | Webhook route | deliver mode | Purpose |
-|-----------|---------------|--------------|---------|
-| `coordination_request` | `a2a-negotiate` | `log` (silent) | Agent handles autonomously |
-| Everything else | `a2a-inbox` | `auto` (user-facing) | Delivered to user's chat |
-
-Config vars: `NOTIFICATION_WEBHOOK_URL` (a2a-inbox), `NOTIFICATION_NEGOTIATE_URL` (a2a-negotiate).
+Host agents receive inbound messages via MCP long-polling (`social_inbox_wait`).
+An SSE stream is also available at `/v1/inbox/stream` for agents that prefer
+push-based delivery (e.g. Claude Code background monitors).
 
 ### MCP Tools
 
@@ -117,30 +112,27 @@ Step 1: User A → Agent A: "coordinate dinner with B"
         Agent A calls social_coordinate(contactId, activity, details)
         Sidecar A → Sidecar B: coordination_request
 
-Step 2: Sidecar B → Agent B (webhook: a2a-negotiate, deliver: log)
+Step 2: Sidecar B stores inbound → Agent B picks up via inbox_wait
         Agent B loads user-profile skill, picks plan
         Agent B calls social_respond(intentId, payload='{"type":"response","status":"agreed","plan":{...}}')
         Sidecar B → Sidecar A: response
 
-Step 3: Sidecar A → Agent A (webhook: a2a-inbox, deliver: auto)
+Step 3: Sidecar A stores inbound → Agent A picks up via inbox_wait
         Agent A outputs plan summary to User A: "Coffee Friday 10am at The Daily Grind. Confirm?"
-        (one-shot session, no tools called)
 
 Step 4: User A → Agent A: "yes"
         Agent A calls social_confirm_plan() [no args needed]
         Sidecar A → Sidecar B: confirmation
 
-Step 5: Sidecar B → Agent B (webhook: a2a-inbox, deliver: auto)
+Step 5: Sidecar B stores inbound → Agent B picks up via inbox_wait
         Agent B outputs to User B: "A confirmed: Coffee Friday 10am. Accept?"
-        (one-shot session, no tools called)
 
 Step 6: User B → Agent B: "yes"
         Agent B calls social_accept_plan() [no args needed]
         Sidecar B → Sidecar A: confirmed
 
-Step 7: Sidecar A → Agent A (webhook: a2a-inbox, deliver: auto)
+Step 7: Sidecar A stores inbound → Agent A picks up via inbox_wait
         Agent A outputs to User A: "All set! Coffee Friday 10am at The Daily Grind."
-        (one-shot session, no tools called)
 ```
 
 ## Development
@@ -242,7 +234,6 @@ docker exec <agent> sh -c 'echo "" > /opt/data/memories/MEMORY.md; rm -f /opt/da
 |---------|-------|-----|
 | 401 on A2A send | Sidecar logs for `PresentationRequired` | Contact missing `did` in DB |
 | Agent says "coordination failed" | Check if skill loaded in session | Wipe MEMORY.md, ensure skills synced |
-| Webhook 401 | Sidecar logs for HTTP 401 on POST | Secret mismatch between .env and agent config |
 | `social_confirm_plan` fails | Query `interaction_contexts` for `data_type='response', status='received'` | Payload missing `"type": "response"` |
 | Agent loops/polls | Session shows `social_inbox` calls | Stale memory. Wipe and restart gateway. |
 | "Instance not bound to Session" | SQLAlchemy detached error in logs | ORM object accessed outside `with _get_session()` |
@@ -251,7 +242,6 @@ docker exec <agent> sh -c 'echo "" > /opt/data/memories/MEMORY.md; rm -f /opt/da
 ## Known Constraints
 
 - **No SCA infrastructure yet** — VP auth bypassed for known contacts via `_TrustedCache`
-- **One-shot webhook sessions** — `deliver: auto` cannot call tools or wait for input
 - **LLM non-determinism** — Agents may misinterpret. Wipe memory for clean state.
 - **Auto-resolving tools** — `social_confirm_plan()` and `social_accept_plan()` find the most recent pending interaction when called with no arguments
 - **Envelope format** — `{"message": {"role": "ROLE_AGENT", "parts": [{"type": "data", "data": {...}}]}}` wrapping `shadownet/v1+envelope`

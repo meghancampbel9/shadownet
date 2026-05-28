@@ -17,9 +17,6 @@ class Settings(BaseSettings):
     agent_request_timeout: int = 30
     agent_retry_attempts: int = 3
     agent_retry_base_delay: float = 2.0
-    notification_webhook_url: str = ""
-    notification_webhook_secret: str = ""
-    notification_negotiate_url: str = ""
     allow_registration: bool = True
     sns_provider_host: str = ""
     trust_store_pairs: str = "[]"

@@ -15,7 +15,7 @@ owns all business logic.
 - **Permissions** — Per-contact allow/deny grants
 - **Storage** — SQLite-backed message history (inbound + outbound)
 - **MCP interface** — Tools for the host agent to send, receive, and coordinate
-- **Webhooks** — Notify the host agent of inbound messages with routing by type
+- **Inbox notification** — Long-poll (`social_inbox_wait`) and SSE stream for inbound messages
 
 ## Quick Start
 
@@ -27,7 +27,7 @@ docker compose up -d    # builds and starts the sidecar
 ```
 
 `setup.sh` will:
-1. Generate JWT and webhook secrets
+1. Generate a JWT secret
 2. Ask for your instance URL, agent name, and owner name
 3. Detect your agent's Docker network
 4. Write `.env` and offer to start the containers
@@ -82,15 +82,6 @@ cp -r skills/social/ ~/.hermes/skills/social/
 
 Or install the plugin for your agent host — see [`plugins/README.md`](plugins/README.md).
 
-### 3. Configure webhooks
-
-Add two webhook routes so shadownet-local can notify your agent of inbound messages.
-See [`agent-config.example.yaml`](agent-config.example.yaml) for the full config.
-
-shadownet-local routes messages by type:
-- `coordination_request` → `a2a-negotiate` (agent handles silently)
-- Everything else → `a2a-inbox` (delivered to user's chat platform)
-
 ## MCP Tools
 
 ### Coordination
@@ -128,27 +119,27 @@ sequenceDiagram
     SA->>SB: A2A HTTP POST
     AA-->>UA: Sent! I'll let you know.
 
-    Note over SB: Webhook → a2a-negotiate (silent)
-    SB->>AB: deliver: log
+    Note over SB: inbox_wait picks up message
+    SB->>AB: social_inbox_wait
     Note over AB: Load profile, pick plan
     AB->>SB: social_respond
     SB->>SA: A2A HTTP POST (response)
 
-    Note over SA: Webhook → a2a-inbox (user-facing)
-    SA->>AA: deliver: auto
+    Note over SA: inbox_wait picks up response
+    SA->>AA: social_inbox_wait
     AA-->>UA: Coffee at The Daily Grind, Friday 10am. Confirm?
 
     UA->>AA: yes
     AA->>SA: social_confirm_plan
     SA->>SB: A2A HTTP POST (confirmation)
 
-    SB->>AB: deliver: auto
+    SB->>AB: social_inbox_wait
     AB-->>UB: Alice confirmed: Coffee Friday 10am. Accept?
     UB->>AB: yes
     AB->>SB: social_accept_plan
     SB->>SA: A2A HTTP POST (confirmed)
 
-    SA->>AA: deliver: auto
+    SA->>AA: social_inbox_wait
     AA-->>UA: All set! Coffee Friday 10am at The Daily Grind.
 ```
 
@@ -162,9 +153,6 @@ All settings use the `SHADOWNET_` env prefix. See [`.env.example`](.env.example)
 | `AGENT_NAME` | Display name in agent card |
 | `OWNER_NAME` | Owner name in agent card |
 | `JWT_SECRET` | Secret for UI auth tokens |
-| `NOTIFICATION_WEBHOOK_URL` | Where to POST user-facing notifications |
-| `NOTIFICATION_NEGOTIATE_URL` | Where to POST autonomous negotiations (falls back to `WEBHOOK_URL`) |
-| `NOTIFICATION_WEBHOOK_SECRET` | HMAC-SHA256 shared secret for webhook signatures |
 
 ## Local Development
 

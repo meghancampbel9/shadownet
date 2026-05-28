@@ -2,7 +2,7 @@
 
 Provides shadownet-local envelope builders, an HTTP client for outbound
 calls with DID-bound handshake headers, and the generic handle_inbound
-function that stores every inbound message and fires a webhook notification.
+function that stores every inbound message and signals the inbox event.
 """
 
 from __future__ import annotations
@@ -238,10 +238,23 @@ async def handle_inbound(
     logger.info("Stored inbound %s from %s (interaction=%s)", data_type, contact.name, ictx.id)
 
     from app.mcp_server import notify_inbox
-    from app.notifications import notify_message_received
 
     notify_inbox()
-    await notify_message_received(contact, data_type, data, ictx.id)
+
+    try:
+        from app.inbox_stream import publish as publish_inbox_event
+
+        publish_inbox_event(
+            {
+                "event": "message_received",
+                "contact": contact.name if hasattr(contact, "name") else str(contact),
+                "data_type": data_type,
+                "interaction_id": ictx.id,
+                "data": data,
+            }
+        )
+    except ImportError:
+        pass
 
     received_at = int(datetime.now(timezone.utc).timestamp())
     return {"taskId": ictx.id, "acceptedAt": received_at}

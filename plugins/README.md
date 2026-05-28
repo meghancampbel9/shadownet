@@ -92,40 +92,6 @@ Apply without restart:
 /reload-mcp
 ```
 
-### 3. Configure webhooks
-
-Add webhook routes to your agent's `config.yaml`:
-
-```yaml
-platforms:
-  webhook:
-    enabled: true
-    extra:
-      port: 8644
-      routes:
-        a2a-negotiate:
-          secret: "<shared secret>"
-          deliver: log
-          prompt: >-
-            Load shadownet-coordination AND user-profile skills.
-            A message from {contact} (contact_id: {contact_id})
-            (interaction_id: {interaction_id}) (type: {data_type}).
-            Data: {data}. Follow the RECEIVER FLOW autonomously.
-            Output "Done." when finished.
-        a2a-inbox:
-          secret: "<shared secret>"
-          deliver: auto
-          prompt: >-
-            Load shadownet-coordination skill.
-            A message from {contact} (contact_id: {contact_id})
-            (interaction_id: {interaction_id}) (type: {data_type}).
-            Data: {data}. One-shot session. Output ONE short message.
-            Do NOT call any tool.
-```
-
-Set the same secret in shadownet-local's `.env` as `SHADOWNET_NOTIFICATION_WEBHOOK_SECRET`.
-Set `SHADOWNET_NOTIFICATION_NEGOTIATE_URL` to the `a2a-negotiate` route URL.
-
 ---
 
 ## Keeping Skills in Sync

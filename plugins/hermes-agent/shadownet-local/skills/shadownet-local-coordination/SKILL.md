@@ -29,12 +29,12 @@ Every step is a **separate short session**. Never loop or poll.
 | # | Trigger | What happens | Tool to call |
 |---|---------|-------------|--------------|
 | 1 | User says "coordinate X with Y" | Send request, tell user "Sent!" | `social_coordinate` |
-| 2 | Webhook: `coordination_request` | Receiver agent negotiates silently | `social_respond` |
-| 3 | Webhook: `response` | Present plan to initiator user, ask "Confirm?" | (none — just output) |
+| 2 | Inbox: `coordination_request` | Receiver agent negotiates silently | `social_respond` |
+| 3 | Inbox: `response` | Present plan to initiator user, ask "Confirm?" | (none — just output) |
 | 4 | Initiator user says "yes" | Confirm the plan | `social_confirm_plan()` |
-| 5 | Webhook: `confirmation` | Present plan to receiver user, ask "Accept?" | (none — just output) |
+| 5 | Inbox: `confirmation` | Present plan to receiver user, ask "Accept?" | (none — just output) |
 | 6 | Receiver user says "yes" | Accept the plan | `social_accept_plan()` |
-| 7 | Webhook: `confirmed` | Tell initiator "All set!" | (none — just output) |
+| 7 | Inbox: `confirmed` | Tell initiator "All set!" | (none — just output) |
 
 ---
 
@@ -66,15 +66,14 @@ Output: "Sent confirmation. I'll let you know when they accept."
 
 ## RECEIVER (another agent sent a coordination request)
 
-This runs in a silent webhook session (`a2a-negotiate`, deliver: log).
-The user is NOT involved.
+This runs autonomously — the user is NOT involved.
 
 1. Load the **user-profile** skill for calendar, preferences, favorite venues.
 2. Pick the best time, place, and activity based on both users' data.
 3. Call:
 
 ```
-social_respond(intentId="<interaction_id from webhook>", payload="{\"type\": \"response\", \"status\": \"agreed\", \"plan\": {\"activity\": \"Coffee\", \"date\": \"Friday May 30\", \"time\": \"10:00 AM\", \"location\": \"The Daily Grind\", \"address\": \"123 Main St\", \"duration\": \"~1.5 hours\"}}")
+social_respond(intentId="<interaction_id from inbox>", payload="{\"type\": \"response\", \"status\": \"agreed\", \"plan\": {\"activity\": \"Coffee\", \"date\": \"Friday May 30\", \"time\": \"10:00 AM\", \"location\": \"The Daily Grind\", \"address\": \"123 Main St\", \"duration\": \"~1.5 hours\"}}")
 ```
 
 IMPORTANT: The payload MUST be a JSON string. It MUST contain `"type": "response"`.
@@ -97,10 +96,10 @@ Output: "Confirmed! Enjoy."
 
 ---
 
-## Webhook Sessions (one-shot, output only)
+## Notification Sessions (one-shot, output only)
 
-When woken by a webhook with `deliver: auto`, you are in a **one-shot session**.
-You CANNOT wait for user input. You CANNOT call tools. Just output a message.
+When woken by `social_inbox_wait` with a new message, output a short summary.
+Do NOT call additional tools — just present the information.
 
 | data_type | Output |
 |-----------|--------|

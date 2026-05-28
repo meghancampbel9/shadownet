@@ -25,11 +25,9 @@ async def lifespan(app: FastAPI):
     init_db()
     init_identity()
 
-    from app.mcp_server import load_persisted_webhook
     from app.signing import init_protocol
 
     init_protocol()
-    load_persisted_webhook()
     logger.info("Agent card (A2A v1.0): %s/.well-known/agent-card.json", settings.external_url)
     yield
     logger.info("shadownet shutting down")
@@ -56,11 +54,13 @@ app.add_middleware(
 from app.inbox_stream import router as inbox_stream_router  # noqa: E402
 from app.routers.a2a import router as a2a_router  # noqa: E402
 from app.routers.auth import router as auth_router  # noqa: E402
+from app.routers.connect import router as connect_router  # noqa: E402
 from app.routers.contacts import router as contacts_router  # noqa: E402
 from app.routers.interactions import router as interactions_router  # noqa: E402
 from app.routers.messages import router as messages_router  # noqa: E402
 
 app.include_router(a2a_router)
+app.include_router(connect_router)
 app.include_router(auth_router, prefix="/api")
 app.include_router(contacts_router, prefix="/api")
 app.include_router(interactions_router, prefix="/api")

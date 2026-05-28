@@ -27,9 +27,25 @@ services:
       - test-agent-network
     labels:
       - traefik.enable=true
+      # SDK user-scoped MCP path /u/{shadowname}/mcp → rewrite to /mcp, port 8341
+      - traefik.http.routers.shadownet-test-mcp-user.rule=Host(`shadownet-test.${TRAEFIK_HOST}`) && PathRegexp(`/u/[^/]+/mcp`)
+      - traefik.http.routers.shadownet-test-mcp-user.entrypoints=websecure
+      - traefik.http.routers.shadownet-test-mcp-user.tls.certresolver=letsencrypt
+      - traefik.http.routers.shadownet-test-mcp-user.service=shadownet-test-mcp
+      - traefik.http.routers.shadownet-test-mcp-user.middlewares=shadownet-test-mcp-rewrite
+      - traefik.http.middlewares.shadownet-test-mcp-rewrite.replacepathregex.regex=^/u/[^/]+/mcp$$
+      - traefik.http.middlewares.shadownet-test-mcp-rewrite.replacepathregex.replacement=/mcp
+      # Direct MCP endpoint /mcp → port 8341
+      - traefik.http.routers.shadownet-test-mcp.rule=Host(`shadownet-test.${TRAEFIK_HOST}`) && PathPrefix(`/mcp`)
+      - traefik.http.routers.shadownet-test-mcp.entrypoints=websecure
+      - traefik.http.routers.shadownet-test-mcp.tls.certresolver=letsencrypt
+      - traefik.http.routers.shadownet-test-mcp.service=shadownet-test-mcp
+      - traefik.http.services.shadownet-test-mcp.loadbalancer.server.port=8341
+      # Everything else → port 8340
       - traefik.http.routers.shadownet-test.rule=Host(`shadownet-test.${TRAEFIK_HOST}`)
       - traefik.http.routers.shadownet-test.entrypoints=websecure
       - traefik.http.routers.shadownet-test.tls.certresolver=letsencrypt
+      - traefik.http.routers.shadownet-test.service=shadownet-test
       - traefik.http.services.shadownet-test.loadbalancer.server.port=8340
 
 networks:
