@@ -42,11 +42,8 @@ def provider_agent_card(local: str):
 
 
 def _problem(error: ShadownetWireError) -> JSONResponse:
+    # problem_response() is §11-safe by default (no detail unless include_detail=True).
     status_code, body, headers = problem_response(error)
-    # RFC 0001 §11 agent opacity: the canonical `type`/`title`/`status` are
-    # spec-defined, but the SDK's free-text `detail` can echo sender identifiers
-    # and classification state — strip it before it crosses the wire.
-    body.pop("detail", None)
     return JSONResponse(body, status_code=status_code, headers=headers)
 
 

@@ -268,8 +268,7 @@ def set_contact_profile(name: str, profile: dict[str, Any]) -> dict[str, Any]:
 @mcp.tool()
 async def send(to: str, body: dict[str, Any], contextId: str | None = None) -> dict[str, Any]:
     """Send a Shadownet envelope. End your turn after calling this."""
-    result = await run_in_threadpool(
-        send_message,
+    result = await send_message(
         to,
         text=body.get("text"),
         intent=body.get("intent"),
@@ -301,8 +300,7 @@ async def respond(contextId: str, body: dict[str, Any]) -> dict[str, Any]:
     peer = _peer_for_context(contextId)
     if peer is None:
         return {"messageId": "", "status": "rejected", "error": "unknown_context"}
-    result = await run_in_threadpool(
-        send_message,
+    result = await send_message(
         peer,
         text=body.get("text"),
         intent=body.get("intent"),
@@ -319,17 +317,14 @@ async def coordinate(name: str, activity: str, details: str | None = None) -> di
     if details:
         data["details"] = details
     text = f"Let's coordinate {activity}" + (f" — {details}" if details else "")
-    result = await run_in_threadpool(
-        send_message, name, text=text, intent=COORDINATE_V1_URI, data=data
-    )
+    result = await send_message(name, text=text, intent=COORDINATE_V1_URI, data=data)
     return {"messageId": result.message_id, "contextId": result.context_id}
 
 
 @mcp.tool()
 async def confirm_plan(name: str, contextId: str, plan: dict[str, Any]) -> dict[str, Any]:
     """Confirm an agreed plan (RFC 0002 §5.2)."""
-    result = await run_in_threadpool(
-        send_message,
+    result = await send_message(
         name,
         text=f"Confirming: {plan.get('activity', 'plan')} at {plan.get('when', '')}",
         intent=CONFIRM_PLAN_V1_URI,
@@ -342,8 +337,7 @@ async def confirm_plan(name: str, contextId: str, plan: dict[str, Any]) -> dict[
 @mcp.tool()
 async def accept_plan(name: str, contextId: str, acceptsMessageId: str) -> dict[str, Any]:
     """Accept a peer's confirmed plan (RFC 0002 §5.3)."""
-    result = await run_in_threadpool(
-        send_message,
+    result = await send_message(
         name,
         text="Accepted.",
         intent=ACCEPT_PLAN_V1_URI,

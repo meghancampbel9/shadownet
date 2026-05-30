@@ -24,6 +24,7 @@ from shadownet.receiver import (
     ReceiverConfig,
     ReceiverPipeline,
 )
+from shadownet.tls import InMemoryTLSPinStore, make_pinned_httpx_client
 from shadownet.trust import AcceptancePolicy, TrustEntry, TrustStore
 from sqlmodel import Session, select
 
@@ -37,6 +38,8 @@ logger = logging.getLogger(__name__)
 _pipeline: ReceiverPipeline | None = None
 _credential_cache: InMemoryCredentialCache | None = None
 _own_creds: tuple[str, ...] = ()
+# Process-wide TOFU store so direct-mode pins persist across resolves (§5.3).
+_tofu_store = InMemoryTLSPinStore()
 
 
 def _utcnow() -> datetime:
@@ -175,18 +178,11 @@ def own_credentials() -> tuple[str, ...]:
 
 
 def _direct_origin_and_client(addr: DirectAddress) -> tuple[str, httpx.Client]:
-    loopback = addr.host in ("localhost", "127.0.0.1", "::1")
-    if loopback:
+    if addr.host in ("localhost", "127.0.0.1", "::1"):
+        # RFC 0001 §4.1 permits http://localhost for local development.
         return f"http://{addr.host}:{addr.port}", httpx.Client(timeout=10.0)
-    if settings.allow_insecure_direct_tls:
-        # Explicit dev/self-signed opt-in only. The envelope JWS is the
-        # authoritative authenticator (RFC 0001 §11), so a MITM still cannot
-        # forge messages — but this disables channel verification entirely.
-        return addr.endpoint, httpx.Client(verify=False, timeout=10.0)  # noqa: S501
-    # TODO: when addr.tls_pin_sha256 is set, enforce the SHA-256 certificate
-    # pin (RFC 0001 §5.3). Until then we fail closed under WebPKI rather than
-    # silently skipping verification when a pin is present.
-    return addr.endpoint, httpx.Client(timeout=10.0)
+    # RFC 0001 §5.3: enforce the #sha256 pin when supplied, otherwise TOFU.
+    return addr.endpoint, make_pinned_httpx_client(addr, tofu_store=_tofu_store, timeout=10.0)
 
 
 def resolve_recipient(to: str) -> tuple[str, str, str]:

@@ -138,6 +138,56 @@ def test_credential_stranger_review(peer_key, our_subject):
     assert decision.route == "stranger_review"
 
 
+def test_credential_keyed_issuer(peer_key, our_subject):
+    # A keyed Hub (iss = z6Mk... public key, §6.6 rule 1) — no DNS lookup needed.
+    import time
+
+    from shadownet.credential import CredentialPayload, mint_credential
+    from shadownet.crypto.ed25519 import Ed25519KeyPair
+    from shadownet.identifiers import encode_public_key
+    from shadownet.receiver import (
+        InMemoryContactGraph,
+        InMemoryCredentialCache,
+        InMemoryReplayCache,
+        ReceiverConfig,
+        ReceiverPipeline,
+    )
+    from shadownet.trust import AcceptancePolicy, TrustEntry, TrustStore
+
+    issuer_key = Ed25519KeyPair.generate()
+    issuer_pk = encode_public_key(issuer_key.public_bytes)
+    peer_id = encode_public_key(peer_key.public_bytes)
+    now = int(time.time())
+    cred = mint_credential(
+        CredentialPayload(
+            iss=issuer_pk,
+            sub=peer_id,
+            kind="org_affiliation",
+            org=issuer_pk,
+            iat=now,
+            exp=now + 3600,
+            rev={"epoch": "e1", "idx": 0},
+        ),
+        issuer_key,
+    )
+    body, _, _ = build_inbound(peer_key, our_subject, creds=(cred,))
+    pipeline = ReceiverPipeline(
+        ReceiverConfig(
+            subject=our_subject,
+            trust_store=TrustStore(
+                entries=(TrustEntry(issuer=issuer_pk, accept=("org_affiliation",)),)
+            ),
+            policy=AcceptancePolicy(),
+        ),
+        replay_cache=InMemoryReplayCache(),
+        contact_graph=InMemoryContactGraph(),
+        credential_cache=InMemoryCredentialCache(),
+        revocation_check=lambda c: None,
+    )
+    decision = pipeline.receive(body)
+    assert decision.route == "stranger_review"
+
+
 def test_http_receive_accepts(client, peer_key, our_subject):
     body, _, peer_id = build_inbound(peer_key, our_subject, text="over http")
     _add_contact(peer_id)

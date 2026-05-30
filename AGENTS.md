@@ -85,13 +85,13 @@ inbound via its `/api/messages` or the `inbox` tool.
 
 - **Credentials**: this build verifies + holds/presents `org_affiliation` creds.
   There is no issuer/CSR client yet (issuance ceremonies are out of scope).
-- **Direct-mode TLS pinning**: the `#sha256:` URI pin is parsed but not yet
-  enforced (fail-closed under WebPKI); loopback uses http, non-loopback
-  self-signed needs `SHADOWNET_ALLOW_INSECURE_DIRECT_TLS=true`. The envelope JWS
-  is the authoritative authenticator.
-- **Outbound retry**: the §8.10 retry uses exponential backoff with ±25% jitter
-  bounded by `AGENT_RETRY_ATTEMPTS` (synchronous send). The full 24-hour
-  background retry budget is future work (needs a delivery queue).
+- **Direct-mode TLS**: the SDK's `make_pinned_httpx_client` enforces the
+  `#sha256:` pin when supplied, else trusts on first use (TOFU, process-wide
+  store); loopback uses http (§4.1). The envelope JWS is authoritative regardless.
+- **Outbound retry**: uses the SDK's `asend_with_retries` (§8.10 remint + jitter),
+  with the retry budget bounded to `AGENT_REQUEST_TIMEOUT` so the foreground MCP
+  `send` returns promptly. Long-horizon background delivery (full 24h budget off
+  the request path) is future work — would use a delivery queue.
 - **SDK on PyPI**: container builds need `shadownet>=0.5.0` published (see the
   Dockerfile TODO); local dev uses the sibling clone via `[tool.uv.sources]`.
 

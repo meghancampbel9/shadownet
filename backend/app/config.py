@@ -29,10 +29,6 @@ class Settings(BaseSettings):
     acceptance_policy: str = ""
     same_provider_org: bool = False
     credentials_path: str = ""
-    # Dev/self-signed escape hatch for direct-mode TLS (RFC 0001 §4.1). Loopback
-    # hosts always use plain http; this allows verify=False for non-loopback
-    # self-signed endpoints. The envelope JWS is the authoritative authenticator.
-    allow_insecure_direct_tls: bool = False
 
     # Portal / MCP access-token signing (opaque to host LLMs, RFC 0003 §6.2).
     jwt_secret: str = "CHANGE-ME-IN-PRODUCTION"
