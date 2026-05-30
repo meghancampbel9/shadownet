@@ -2,7 +2,7 @@
   "mcpServers": {
     "shadownet": {
       "type": "http",
-      "url": "${SHADOWNET_SIDECAR_BASE_URL}/u/${SHADOWNET_SHADOWNAME}/mcp",
+      "url": "${SHADOWNET_MCP_URL}",
       "headers": {
         "Authorization": "Bearer ${SHADOWNET_TOKEN}"
       }

@@ -16,16 +16,18 @@ ENV PATH="/app/.venv/bin:$PATH"
 WORKDIR /app
 
 COPY backend/pyproject.toml backend/uv.lock ./
-RUN uv sync --locked --no-install-project
+# TODO: requires shadownet>=0.5.0 published to PyPI. --no-sources ignores the
+# dev path source (the sibling monorepo clone is not in the build context).
+RUN uv sync --locked --no-sources --no-install-project
 
 COPY backend/ .
-RUN uv sync --locked
+RUN uv sync --locked --no-sources
 
 # Copy built SPA into /app/static
 COPY --from=frontend /build/dist /app/static
 
 RUN mkdir -p /app/data/identity
 
-EXPOSE 8340 8341
+EXPOSE 8340
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8340 & uvicorn app.mcp_run:app --host 0.0.0.0 --port 8341 & wait"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8340"]

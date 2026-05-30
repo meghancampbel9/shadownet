@@ -1,129 +1,80 @@
 # shadownet-local
 
-Self-hosted agent-to-agent communication sidecar built on the
-[Shadownet v0.1 protocol](https://github.com/shadownet-protocol/shadownet-specs).
+Self-hosted agent-to-agent communication Sidecar implementing the
+[Shadownet v0.2 protocol](https://github.com/shadownet-protocol/shadownet-specs).
 
 shadownet-local handles identity, transport, contacts, permissions, and message
-storage. The host agent (Hermes, Claude Code, or any MCP-compatible framework)
-owns all business logic and connects via the plugin model.
+storage. The host agent (Claude Code, Hermes, or any MCP host) owns all business
+logic and connects over the MCP control surface (RFC 0002).
 
 ## Features
 
-- **Identity** — Ed25519 keypair, DID:key, A2A agent cards
-- **Transport** — Send and receive A2A messages over HTTP+JSON
-- **Contacts** — Manage a graph of known remote agents with DID verification
-- **Permissions** — Per-contact allow/deny grants
-- **Storage** — SQLite-backed message history (inbound + outbound)
-- **MCP interface** — Authenticated tools for the host agent to send, receive, and coordinate
-- **Plugin compat** — RFC-0008 integration bundle + `social_inbox_wait` long-poll
+- **Identity** — Ed25519 key (multibase `z6Mk…`); the key *is* the identity
+- **Two addressing modes** — direct (`shadow://key:z6Mk…@host:port`, no DNS) by
+  default, or Shadowname (`you@your-domain`) if you run as your own provider
+- **Transport** — A2A `message:send` carrying a signed Shadownet envelope JWS in
+  `metadata["urn:shadownet:0.2"]`, bound to the message by `msgHash`
+- **Trust** — verify inbound `org_affiliation` credentials against a configurable
+  trust store + acceptance policy; present your own credentials on outbound
+- **Contacts** — contact graph with auto-add-on-outbound (RFC 0001 §9)
+- **MCP control surface** — RFC 0002 bare-name tools (`identity`, `resolve`,
+  `send`, `coordinate`, `inbox_wait`, …)
+- **Onboarding** — RFC 0003 `shadow://connect` links (handoff + refresh)
 
 ## Quick Start
 
 ```bash
 git clone https://github.com/shadownet-protocol/shadownet-local.git
 cd shadownet-local
-./setup.sh              # generates secrets, writes .env
+./setup.sh              # writes .env (direct mode by default)
 docker compose up -d    # builds and starts the sidecar
 ```
 
-`setup.sh` will:
-1. Generate JWT secret
-2. Ask for your instance URL, shadowname, agent name, and owner name
-3. Detect your agent's Docker network
-4. Write `.env` and offer to start the containers
-
-After startup, open your configured URL to manage contacts and view messages.
+Then open the UI, create an account, and use **Connect → Generate connect link**
+to pair a host agent.
 
 ## Deployment
 
-### Default (plain ports)
-
-Exposes the UI on port 8340 and MCP on port 8341. Use your own reverse proxy
-(Nginx, Caddy, Traefik) for HTTPS.
-
 ```bash
-docker compose up -d
+docker compose up -d                                                   # plain port 8340
+docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d   # Traefik HTTPS
+docker compose -f docker-compose.yml -f docker-compose.test.yml up -d      # local test peer
 ```
 
-### With Traefik
+Use a reverse proxy (Caddy, Traefik, Nginx) for HTTPS. Direct-mode endpoints may
+serve a self-signed certificate (the envelope JWS is the authoritative
+authenticator); production deployments typically front this with WebPKI TLS.
 
-```bash
-# Set TRAEFIK_HOST=your.server.com in .env
-docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d
-```
+## Agent integration
 
-### With a test peer
-
-Spin up a second instance for local A2A testing:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
-```
-
-## Agent Integration
-
-Install the official Shadownet plugin for your agent host. The plugin handles
-MCP, skills, and inbound message delivery automatically via long-poll.
-
-### Hermes Agent
-
-```bash
-hermes plugins install shadownet-protocol/shadownet --enable
-```
-
-Set two environment variables:
-
-```bash
-export SHADOWNET_TOKEN="<your JWT from the sidecar UI>"
-export SHADOWNET_SIDECAR_BASE_URL="https://your-instance.example.com"
-```
-
-Restart Hermes. The plugin connects to `/u/{shadowname}/mcp` with Bearer auth
-and starts the `social_inbox_wait` long-poll loop. No webhooks, no NAT
-traversal, no skill copying needed.
-
-### Claude Code / Cursor
-
-Point your MCP config at the authenticated endpoint:
+The portal's **Connect** page mints a single-use `shadow://connect?mcp=…&handoff=…`
+link. The host plugin redeems it (or you paste the `mcp=` URL + access token) and
+opens an MCP session with `Authorization: Bearer <access-token>`.
 
 ```json
 {
   "mcpServers": {
     "shadownet": {
       "type": "http",
-      "url": "https://your-instance.example.com/u/you@your-instance.example.com/mcp",
-      "headers": { "Authorization": "Bearer <your-jwt>" }
+      "url": "https://your-instance.example.com/u/<label>/mcp",
+      "headers": { "Authorization": "Bearer <access-token>" }
     }
   }
 }
 ```
 
-Or visit `/connect/claude-code` or `/connect/cursor` on your sidecar for
-a ready-made snippet.
+## MCP tools (RFC 0002)
 
-## MCP Tools
+| Group | Tools |
+|-------|-------|
+| Identity / discovery | `identity`, `resolve` |
+| Contacts | `contacts`, `contact_detail`, `add_contact`, `grant`, `set_contact_profile` |
+| Messaging | `send`, `respond`, `inbox`, `inbox_wait` |
+| Coordination | `coordinate`, `confirm_plan`, `accept_plan` |
 
-### Coordination
+Recipients are addressed by Shadowname or connection URI — never a database id.
 
-| Tool | Purpose |
-|------|---------|
-| `social_coordinate(contactId, activity, details)` | Start a coordination — agents negotiate autonomously |
-| `social_confirm_plan()` | Confirm a proposed plan (auto-finds the pending interaction) |
-| `social_accept_plan()` | Accept a confirmed plan (auto-finds the pending interaction) |
-
-### Messaging
-
-| Tool | Purpose |
-|------|---------|
-| `social_send(contactId, payload)` | Send a message to a contact |
-| `social_respond(intentId, payload)` | Reply to an interaction |
-| `social_inbox(limit, data_type, contact_id)` | List recent inbound messages |
-| `social_inbox_wait(timeout_seconds, last_event_id)` | Long-poll for new messages |
-| `social_contacts(query)` | List or search contacts |
-| `social_contact_detail(contact_id)` | Get full contact details |
-| `social_interactions(data_type, status_filter, direction, limit)` | List interactions |
-
-## Message Flow
+## Coordination flow
 
 ```mermaid
 sequenceDiagram
@@ -134,69 +85,61 @@ sequenceDiagram
     participant AB as Agent B
     actor UB as User B
 
-    UA->>AA: coordinate coffee with B
-    AA->>SA: social_coordinate
-    SA->>SB: A2A HTTP POST
-    AA-->>UA: Sent! I'll let you know.
+    UA->>AA: coordinate coffee with bob@host
+    AA->>SA: coordinate (intent coordinate_v1)
+    SA->>SB: A2A message:send (envelope JWS)
+    AA-->>UA: Sent — I'll let you know.
 
     Note over SB: inbox_wait delivers event
-    AB->>SB: social_respond (agreed plan)
-    SB->>SA: A2A HTTP POST (response)
+    AB->>SB: respond (intent confirm_plan_v1, typed plan)
+    SB->>SA: A2A message:send
 
     Note over SA: inbox_wait delivers event
-    AA-->>UA: Coffee at The Daily Grind, Friday 10am. Confirm?
-
+    AA-->>UA: Coffee at The Daily Grind, Fri 10am. Confirm?
     UA->>AA: yes
-    AA->>SA: social_confirm_plan
-    SA->>SB: A2A HTTP POST (confirmation)
+    AA->>SA: confirm_plan (intent confirm_plan_v1)
+    SA->>SB: A2A message:send
 
     Note over SB: inbox_wait delivers event
-    AB-->>UB: A confirmed: Coffee Friday 10am. Accept?
+    AB-->>UB: A confirmed. Accept?
     UB->>AB: yes
-    AB->>SB: social_accept_plan
-    SB->>SA: A2A HTTP POST (confirmed)
+    AB->>SB: accept_plan (intent accept_plan_v1)
+    SB->>SA: A2A message:send
 
     Note over SA: inbox_wait delivers event
-    AA-->>UA: All set! Coffee Friday 10am at The Daily Grind.
+    AA-->>UA: All set — Coffee Friday 10am.
 ```
 
 ## Configuration
 
-All settings use the `SHADOWNET_` env prefix. See [`.env.example`](.env.example) for the full list.
+All settings use the `SHADOWNET_` env prefix. See [`.env.example`](.env.example).
 
 | Variable | Description |
 |----------|-------------|
-| `EXTERNAL_URL` | Public URL for this instance (must be `https://`) |
-| `SHADOWNAME` | Your shadowname in `local@provider` format (e.g., `meghan@sh4dow.org`) |
-| `AGENT_NAME` | Display name in agent card |
-| `OWNER_NAME` | Owner name in agent card |
-| `JWT_SECRET` | Secret for auth tokens (also used as plugin `SHADOWNET_TOKEN`) |
+| `EXTERNAL_URL` | Public URL; the AgentCard + connection URI derive from it |
+| `ADDRESSING_MODE` | `direct` (default) or `shadowname` |
+| `SHADOWNAME` / `PROVIDER_DOMAIN` | Shadowname-mode identity + provider domain |
+| `TRUST_STORE` | JSON list of `{issuer, accept}` (empty = trust nobody yet) |
+| `ACCEPTANCE_POLICY` | JSON `{fromContact, fromStranger}` (default requires `org_affiliation` from strangers) |
+| `CREDENTIALS_PATH` | File/dir of `org_affiliation` JWTs this Subject presents |
+| `JWT_SECRET` | Signs the portal's opaque access/refresh tokens |
 
-## Local Development
+## Local development
 
-Requires [uv](https://docs.astral.sh/uv/).
+Requires [uv](https://docs.astral.sh/uv/). The Shadownet SDK (v0.5.0) resolves
+from the sibling `../shadownet/python-sdk` clone until it ships on PyPI.
 
 ```bash
-# Backend
-cd backend
-uv sync --group dev
-cp .env.example .env
+cd backend && uv sync --group dev && cp ../.env.example .env
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8340
-uv run uvicorn app.mcp_run:app --host 0.0.0.0 --port 8341
-
-# Frontend
-cd frontend
-npm ci
-npm run dev
-
-# Tests
-cd backend
-uv run pytest tests/
+cd frontend && npm ci && npm run dev      # UI
+cd backend && uv run ruff check . && uv run pytest    # gate
 ```
 
 ## Architecture
 
-See [DESIGN.md](DESIGN.md) for internals.
+See [DESIGN.md](DESIGN.md) for internals and [AGENTS.md](AGENTS.md) for the
+agent-facing guide.
 
 ## License
 

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Generator
 
-from sqlalchemy import event
+from sqlalchemy import event, inspect, text
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 connect_args = {}
 if settings.database_url.startswith("sqlite"):
@@ -25,6 +28,16 @@ if settings.database_url.startswith("sqlite"):
 
 
 def init_db() -> None:
+    # v0.1 → v0.2 is a breaking schema change with no production data. If a
+    # legacy database is present, drop it and recreate against the new models.
+    legacy = {"interaction_contexts"}
+    existing = set(inspect(engine).get_table_names())
+    if legacy & existing:
+        logger.warning("Dropping legacy v0.1 schema %s and recreating for v0.2", legacy & existing)
+        with engine.begin() as conn:
+            for table in legacy & existing:
+                conn.execute(text(f"DROP TABLE IF EXISTS {table}"))
+        SQLModel.metadata.drop_all(engine)
     SQLModel.metadata.create_all(engine)
 
 

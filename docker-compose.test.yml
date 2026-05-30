@@ -13,7 +13,6 @@ services:
     restart: unless-stopped
     ports:
       - "${SHADOWNET_TEST_PORT:-8350}:8340"
-      - "${SHADOWNET_TEST_MCP_PORT:-8351}:8341"
     env_file:
       - .env.test
     environment:

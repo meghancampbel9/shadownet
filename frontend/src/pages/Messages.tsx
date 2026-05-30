@@ -19,12 +19,12 @@ export function MessagesPage() {
                 ? <ArrowDownLeft size={12} className="text-blue-400" />
                 : <ArrowUpRight size={12} className="text-accent" />}
               <span className="text-xs text-fg font-medium">{m.contact_name || "Unknown"}</span>
-              <span className="text-[10px] text-muted px-1.5 py-0.5 bg-surface-2 rounded">{m.data_type}</span>
-              <span className="text-[10px] text-muted px-1.5 py-0.5 bg-surface-2 rounded">{m.status}</span>
+              {m.intent && <span className="text-[10px] text-accent/80 px-1.5 py-0.5 bg-accent/10 rounded font-mono">{m.intent.split(":").pop()}</span>}
+              <span className="text-[10px] text-muted px-1.5 py-0.5 bg-surface-2 rounded">{m.route}</span>
               <span className="text-[10px] text-muted ml-auto">{new Date(m.created_at).toLocaleString()}</span>
             </div>
             <pre className="text-[11px] text-muted bg-surface-0 rounded p-2 overflow-x-auto max-h-32 whitespace-pre-wrap">
-              {typeof m.data === "object" ? JSON.stringify(m.data, null, 2) : String(m.data ?? "")}
+              {JSON.stringify(m.body, null, 2)}
             </pre>
           </div>
         ))}

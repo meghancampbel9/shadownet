@@ -16,24 +16,24 @@ class GrantDenied(Exception):
         super().__init__(f"Grant '{grant_type}' not allowed for action '{action}'")
 
 
-def find_contact_by_endpoint(session: Session, endpoint: str) -> Contact | None:
-    normalized = endpoint.rstrip("/")
-    stmt = select(Contact).where(Contact.agent_endpoint == endpoint)
-    result = session.exec(stmt).first()
-    if result is None:
-        stmt = select(Contact).where(Contact.agent_endpoint == normalized)
-        result = session.exec(stmt).first()
-    if result is None:
-        stmt = select(Contact).where(Contact.agent_endpoint == normalized + "/")
-        result = session.exec(stmt).first()
-    return result
-
-
-def find_contact_by_did(session: Session, did: str) -> Contact | None:
-    if not did:
+def find_contact_by_identifier(session: Session, identifier: str) -> Contact | None:
+    if not identifier:
         return None
-    stmt = select(Contact).where(Contact.did == did)
-    return session.exec(stmt).first()
+    return session.exec(select(Contact).where(Contact.identifier == identifier)).first()
+
+
+def is_allowed_contact(session: Session, identifier: str) -> bool:
+    """True if `identifier` is a contact with an allowed messaging grant (RFC 0002 §4)."""
+    contact = find_contact_by_identifier(session, identifier)
+    if contact is None:
+        return False
+    grant = session.exec(
+        select(AccessGrant)
+        .where(AccessGrant.contact_id == contact.id)
+        .where(AccessGrant.grant_type == GrantType.messaging)
+        .where(AccessGrant.allowed == True)  # noqa: E712
+    ).first()
+    return grant is not None
 
 
 def enforce_grant(session: Session, contact: Contact) -> None:

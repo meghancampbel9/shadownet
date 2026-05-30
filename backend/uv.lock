@@ -1075,30 +1075,43 @@ wheels = [
 
 [[package]]
 name = "shadownet"
-version = "0.3.1"
-source = { registry = "https://pypi.org/simple" }
+source = { editable = "../../shadownet/python-sdk" }
 dependencies = [
     { name = "a2a-sdk" },
     { name = "cryptography" },
+    { name = "dnspython" },
     { name = "httpx" },
     { name = "mcp" },
     { name = "pydantic" },
     { name = "pyjwt", extra = ["crypto"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ef/46/b69ee71137afe251cbfbb7addb067d280b63cc04f026d296dfa80ebcdb5b/shadownet-0.3.1.tar.gz", hash = "sha256:b61fcaec9e6bacdf7228dbb8a1c78b303e3dcce4a2aa7ec88ff37ff9499eeba7", size = 57247, upload-time = "2026-05-19T18:36:31.17Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/94/50/86c75ba0fb5bd304e4c6aa202fa2943e735cc5b5d07842d55aa21408278b/shadownet-0.3.1-py3-none-any.whl", hash = "sha256:18373ae7fb8bb7a75950e6e4b3a3323f2d3ae0b40a9d4591b39c0d61dc1f8249", size = 81621, upload-time = "2026-05-19T18:36:29.839Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "a2a-sdk", specifier = ">=0.2" },
+    { name = "cryptography", specifier = ">=43" },
+    { name = "dnspython", specifier = ">=2.7" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "mcp", specifier = ">=1.2" },
+    { name = "pydantic", specifier = ">=2.7" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.9" },
 ]
 
-[package.optional-dependencies]
-fastapi = [
-    { name = "fastapi" },
-    { name = "starlette" },
+[package.metadata.requires-dev]
+dev = [
+    { name = "jsonschema", specifier = ">=4.23" },
+    { name = "mypy", specifier = ">=1.13" },
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-asyncio", specifier = ">=0.24" },
+    { name = "pytest-cov", specifier = ">=5" },
+    { name = "respx", specifier = ">=0.21" },
+    { name = "ruff", specifier = ">=0.7" },
+    { name = "types-jsonschema", specifier = ">=4.23" },
 ]
 
 [[package]]
 name = "shadownet-local"
-version = "0.1.0"
+version = "0.2.0"
 source = { virtual = "." }
 dependencies = [
     { name = "bcrypt" },
@@ -1109,7 +1122,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyjwt", extra = ["crypto"] },
-    { name = "shadownet", extra = ["fastapi"] },
+    { name = "shadownet" },
     { name = "sqlmodel" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -1131,7 +1144,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.9,<3" },
     { name = "pydantic-settings", specifier = ">=2.6,<3" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10,<3" },
-    { name = "shadownet", extras = ["fastapi"], specifier = ">=0.3.0" },
+    { name = "shadownet", editable = "../../shadownet/python-sdk" },
     { name = "sqlmodel", specifier = ">=0.0.22,<1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32,<1" },
 ]

@@ -2,7 +2,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { GRANT_TYPES, type GrantType } from "@/lib/types";
-import { ArrowLeft, Trash2, Fingerprint, AtSign, Globe, Key } from "lucide-react";
+import { ArrowLeft, Trash2, Key, Globe, BadgeCheck } from "lucide-react";
 
 const GRANT_LABELS: Record<GrantType, string> = {
   messaging: "Allow messaging",
@@ -35,21 +35,12 @@ export function ContactDetailPage() {
     <div className="space-y-8">
       <div className="flex items-center gap-3">
         <Link to="/contacts" className="text-muted hover:text-fg transition-colors"><ArrowLeft size={16} /></Link>
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-semibold">{contact.name}</h1>
-            {contact.shadowname && (
-              <span className="text-xs text-accent/80 font-mono">@{contact.shadowname}</span>
-            )}
-          </div>
-          {contact.did ? (
-            <p className="text-[10px] text-muted font-mono truncate flex items-center gap-1 mt-0.5">
-              <Fingerprint size={10} className="text-purple-400 shrink-0" />
-              {contact.did}
-            </p>
-          ) : (
-            <p className="text-xs text-muted truncate">{contact.agent_endpoint}</p>
-          )}
+        <div className="flex-1 min-w-0">
+          <h1 className="text-lg font-semibold">{contact.name}</h1>
+          <p className="text-[10px] text-muted font-mono truncate flex items-center gap-1 mt-0.5">
+            <Key size={10} className="text-accent shrink-0" />
+            {contact.identifier}
+          </p>
         </div>
         <button onClick={() => { if (confirm("Delete this contact?")) deleteMutation.mutate(); }}
           className="text-red-400 hover:text-red-300 transition-colors"><Trash2 size={16} /></button>
@@ -59,16 +50,11 @@ export function ContactDetailPage() {
         <section className="space-y-3">
           <h2 className="text-xs uppercase tracking-widest text-muted">Identity</h2>
           <div className="bg-surface-1 border border-border rounded p-4 space-y-3 text-sm">
-            {contact.did && (
-              <Row icon={<Fingerprint size={12} className="text-purple-400" />} label="DID" value={contact.did} mono />
-            )}
-            {contact.shadowname && (
-              <Row icon={<AtSign size={12} className="text-accent" />} label="Shadowname" value={contact.shadowname} />
+            <Row icon={<Key size={12} className="text-accent" />} label="Identifier" value={contact.identifier} mono />
+            {contact.public_key && contact.public_key !== contact.identifier && (
+              <Row icon={<Key size={12} className="text-muted" />} label="Public key" value={contact.public_key} mono />
             )}
             <Row icon={<Globe size={12} className="text-muted" />} label="Endpoint" value={contact.agent_endpoint} mono />
-            {contact.agent_public_key && (
-              <Row icon={<Key size={12} className="text-muted" />} label="Legacy Key" value={contact.agent_public_key.slice(0, 24) + "..."} mono />
-            )}
           </div>
         </section>
 
@@ -77,7 +63,24 @@ export function ContactDetailPage() {
           <div className="bg-surface-1 border border-border rounded p-4 space-y-3 text-sm">
             {contact.label && <Row label="Label" value={contact.label} />}
             {contact.notes && <Row label="Notes" value={contact.notes} />}
-            <Row label="Added" value={new Date(contact.created_at).toLocaleDateString()} />
+            <Row label="Added" value={new Date(contact.added_at).toLocaleDateString()} />
+            {contact.last_seen && <Row label="Last seen" value={new Date(contact.last_seen).toLocaleString()} />}
+          </div>
+        </section>
+
+        <section className="space-y-3 sm:col-span-2">
+          <h2 className="text-xs uppercase tracking-widest text-muted">Credentials</h2>
+          <div className="bg-surface-1 border border-border rounded p-4 space-y-2 text-sm">
+            {contact.credentials?.length ? contact.credentials.map((cred, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <BadgeCheck size={12} className="text-accent shrink-0" />
+                <span className="text-xs text-fg">{cred.kind}</span>
+                <span className="text-[10px] text-muted font-mono truncate">{cred.org}</span>
+                <span className="text-[10px] text-muted ml-auto shrink-0">
+                  exp {new Date(cred.expiresAt).toLocaleDateString()}
+                </span>
+              </div>
+            )) : <p className="text-[11px] text-muted">No credentials presented yet.</p>}
           </div>
         </section>
 
@@ -99,15 +102,6 @@ export function ContactDetailPage() {
           </div>
         </section>
       </div>
-
-      {!contact.did && (
-        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded p-3">
-          <p className="text-[11px] text-yellow-300">
-            This contact has no DID assigned. A2A handshake auth will be skipped (legacy mode).
-            Ask the peer for their DID or resolve their shadowname to upgrade.
-          </p>
-        </div>
-      )}
     </div>
   );
 }

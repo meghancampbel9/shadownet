@@ -9,45 +9,44 @@ export type GrantType = "messaging";
 
 export const GRANT_TYPES: GrantType[] = ["messaging"];
 
-export interface Contact {
-  id: string;
-  name: string;
-  agent_endpoint: string;
-  agent_public_key: string;
-  did: string;
-  shadowname: string;
-  public_key_jwk: string;
-  label: string;
-  notes: string;
-  metadata: Record<string, unknown>;
-  allowed: boolean;
-  grants: Record<GrantType, boolean>;
-  created_at: string;
-  updated_at: string;
+export interface Credential {
+  kind: string;
+  issuer: string;
+  org: string;
+  expiresAt: string;
 }
 
-export interface Interaction {
+export interface Contact {
   id: string;
-  data_type: string;
-  contact: string;
-  contact_id: string;
-  direction: string;
-  status: string;
-  data: Record<string, unknown>;
+  identifier: string;
+  name: string;
+  public_key: string;
+  agent_endpoint: string;
+  label: string;
+  notes: string;
+  profile: Record<string, unknown>;
+  allowed: boolean;
+  grants: Record<GrantType, boolean>;
+  credentials: Credential[];
+  added_at: string;
+  last_seen: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export type MessageDirection = "inbound" | "outbound";
 
-export interface AgentMessage {
+export interface Message {
   id: string;
-  direction: MessageDirection;
-  contact_id: string | null;
+  message_id: string;
+  context_id: string;
+  sender: string;
+  recipient: string;
   contact_name: string;
-  data_type: string;
-  status: string;
-  data: Record<string, unknown>;
+  direction: MessageDirection;
+  route: string;
+  intent: string;
+  body: Record<string, unknown>;
   created_at: string;
 }
 
@@ -55,6 +54,13 @@ export interface HealthResponse {
   status: string;
   agent: string;
   owner: string;
-  did: string;
-  public_key: string;
+  subject: string;
+  pk: string;
+  connectionUri: string;
+}
+
+export interface ConnectResponse {
+  connectUri: string;
+  handoff?: string;
+  expiresAt: string;
 }
