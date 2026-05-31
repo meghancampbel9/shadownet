@@ -92,8 +92,9 @@ inbound via its `/api/messages` or the `inbox` tool.
   with the retry budget bounded to `AGENT_REQUEST_TIMEOUT` so the foreground MCP
   `send` returns promptly. Long-horizon background delivery (full 24h budget off
   the request path) is future work — would use a delivery queue.
-- **SDK on PyPI**: container builds need `shadownet>=0.5.0` published (see the
-  Dockerfile TODO); local dev uses the sibling clone via `[tool.uv.sources]`.
+- **SDK source**: `shadownet` (0.5.0) resolves from the public monorepo git
+  source pinned in `uv.lock` (`[tool.uv.sources]`) — works in CI, Docker, and
+  locally without a sibling checkout. Switch to a PyPI version pin once published.
 
 ## Common Failures
 

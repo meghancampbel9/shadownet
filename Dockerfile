@@ -16,12 +16,12 @@ ENV PATH="/app/.venv/bin:$PATH"
 WORKDIR /app
 
 COPY backend/pyproject.toml backend/uv.lock ./
-# TODO: requires shadownet>=0.5.0 published to PyPI. --no-sources ignores the
-# dev path source (the sibling monorepo clone is not in the build context).
-RUN uv sync --locked --no-sources --no-install-project
+# The SDK resolves from the public monorepo git source pinned in uv.lock (needs
+# network at build time). TODO: switch to --no-sources once it ships on PyPI.
+RUN uv sync --locked --no-install-project
 
 COPY backend/ .
-RUN uv sync --locked --no-sources
+RUN uv sync --locked
 
 # Copy built SPA into /app/static
 COPY --from=frontend /build/dist /app/static

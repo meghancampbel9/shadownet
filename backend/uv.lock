@@ -1075,7 +1075,8 @@ wheels = [
 
 [[package]]
 name = "shadownet"
-source = { editable = "../../shadownet/python-sdk" }
+version = "0.5.0"
+source = { git = "https://github.com/shadownet-protocol/shadownet.git?subdirectory=python-sdk&branch=feat%2Fshadownet-0.2-migration#0c9d2ec464a33cb5d49dc042a9e72356e33f2106" }
 dependencies = [
     { name = "a2a-sdk" },
     { name = "cryptography" },
@@ -1084,29 +1085,6 @@ dependencies = [
     { name = "mcp" },
     { name = "pydantic" },
     { name = "pyjwt", extra = ["crypto"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "a2a-sdk", specifier = ">=0.2" },
-    { name = "cryptography", specifier = ">=43" },
-    { name = "dnspython", specifier = ">=2.7" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "mcp", specifier = ">=1.2" },
-    { name = "pydantic", specifier = ">=2.7" },
-    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.9" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "jsonschema", specifier = ">=4.23" },
-    { name = "mypy", specifier = ">=1.13" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "pytest-asyncio", specifier = ">=0.24" },
-    { name = "pytest-cov", specifier = ">=5" },
-    { name = "respx", specifier = ">=0.21" },
-    { name = "ruff", specifier = ">=0.7" },
-    { name = "types-jsonschema", specifier = ">=4.23" },
 ]
 
 [[package]]
@@ -1144,7 +1122,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.9,<3" },
     { name = "pydantic-settings", specifier = ">=2.6,<3" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10,<3" },
-    { name = "shadownet", editable = "../../shadownet/python-sdk" },
+    { name = "shadownet", git = "https://github.com/shadownet-protocol/shadownet.git?subdirectory=python-sdk&branch=feat%2Fshadownet-0.2-migration" },
     { name = "sqlmodel", specifier = ">=0.0.22,<1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32,<1" },
 ]

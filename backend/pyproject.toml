@@ -24,11 +24,12 @@ dev = [
     "ruff>=0.9,<1",
 ]
 
-# TODO: drop this source once shadownet v0.5.0 is published to PyPI. Until then
-# dev resolves the SDK from the sibling monorepo clone; container builds use
-# `uv sync --no-sources` (which needs the published package — see Dockerfile).
+# TODO: replace with a plain PyPI version pin (and drop this source) once
+# shadownet 0.5.0 is published. Until then the SDK resolves straight from the
+# public monorepo branch over git — works in CI, Docker, and for contributors
+# without needing a sibling checkout.
 [tool.uv.sources]
-shadownet = { path = "../../shadownet/python-sdk", editable = true }
+shadownet = { git = "https://github.com/shadownet-protocol/shadownet.git", subdirectory = "python-sdk", branch = "feat/shadownet-0.2-migration" }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
