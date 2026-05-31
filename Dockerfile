@@ -16,8 +16,6 @@ ENV PATH="/app/.venv/bin:$PATH"
 WORKDIR /app
 
 COPY backend/pyproject.toml backend/uv.lock ./
-# The SDK resolves from the public monorepo git source pinned in uv.lock (needs
-# network at build time). TODO: switch to --no-sources once it ships on PyPI.
 RUN uv sync --locked --no-install-project
 
 COPY backend/ .

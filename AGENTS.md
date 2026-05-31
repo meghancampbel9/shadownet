@@ -92,9 +92,6 @@ inbound via its `/api/messages` or the `inbox` tool.
   with the retry budget bounded to `AGENT_REQUEST_TIMEOUT` so the foreground MCP
   `send` returns promptly. Long-horizon background delivery (full 24h budget off
   the request path) is future work — would use a delivery queue.
-- **SDK source**: `shadownet` (0.5.0) resolves from the public monorepo git
-  source pinned in `uv.lock` (`[tool.uv.sources]`) — works in CI, Docker, and
-  locally without a sibling checkout. Switch to a PyPI version pin once published.
 
 ## Common Failures
 
@@ -104,4 +101,4 @@ inbound via its `/api/messages` or the `inbox` tool.
 | `unknown_recipient` 404 | envelope `to` ≠ this Subject | confirm the connection URI / shadowname |
 | `parse_error` 400 | tampered message or missing `A2A-Extensions` header | send `A2A-Extensions: urn:shadownet:0.2` |
 | MCP `unauthorized` | access token expired/revoked | re-onboard via the Connect page |
-| resolve fails (direct) | self-signed TLS on a non-loopback host | set `SHADOWNET_ALLOW_INSECURE_DIRECT_TLS=true` (dev) or front with WebPKI |
+| resolve fails (direct) | TLS cert fingerprint ≠ the URI's `#sha256:` pin, or a rotated self-signed cert vs the recorded TOFU pin | re-share the correct connection URI / pin |

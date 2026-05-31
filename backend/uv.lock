@@ -1076,7 +1076,7 @@ wheels = [
 [[package]]
 name = "shadownet"
 version = "0.5.0"
-source = { git = "https://github.com/shadownet-protocol/shadownet.git?subdirectory=python-sdk&branch=feat%2Fshadownet-0.2-migration#0c9d2ec464a33cb5d49dc042a9e72356e33f2106" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "a2a-sdk" },
     { name = "cryptography" },
@@ -1085,6 +1085,10 @@ dependencies = [
     { name = "mcp" },
     { name = "pydantic" },
     { name = "pyjwt", extra = ["crypto"] },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/aa/1d/a0c80a75b8436fbf2b5f33608c42def98b11c8dd3eeed10ebdd37cdb2fbf/shadownet-0.5.0.tar.gz", hash = "sha256:7fc80a7184db143830cbe905349b26a0c92922e999f98dc5a297c13e2831304b", size = 53303, upload-time = "2026-05-31T10:51:21.532Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/08/a4/6bfa66f6cd5eeae8f61c74d861d9e1311a02b372993876ec159048cd70ca/shadownet-0.5.0-py3-none-any.whl", hash = "sha256:2093e758ba03076fe4919972120e8b14b6752cfd1819c33cde9e10cad276d198", size = 60998, upload-time = "2026-05-31T10:51:20.193Z" },
 ]
 
 [[package]]
@@ -1122,7 +1126,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.9,<3" },
     { name = "pydantic-settings", specifier = ">=2.6,<3" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10,<3" },
-    { name = "shadownet", git = "https://github.com/shadownet-protocol/shadownet.git?subdirectory=python-sdk&branch=feat%2Fshadownet-0.2-migration" },
+    { name = "shadownet", specifier = ">=0.5.0,<0.6" },
     { name = "sqlmodel", specifier = ">=0.0.22,<1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32,<1" },
 ]

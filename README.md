@@ -126,9 +126,8 @@ All settings use the `SHADOWNET_` env prefix. See [`.env.example`](.env.example)
 
 ## Local development
 
-Requires [uv](https://docs.astral.sh/uv/). The Shadownet SDK (v0.5.0) resolves
-from the public monorepo git source pinned in `uv.lock` until it ships on PyPI
-(no sibling checkout needed).
+Requires [uv](https://docs.astral.sh/uv/). The Shadownet SDK
+(`shadownet>=0.5.0`) installs from PyPI.
 
 ```bash
 cd backend && uv sync --group dev && cp ../.env.example .env
