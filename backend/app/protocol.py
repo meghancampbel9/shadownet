@@ -179,14 +179,28 @@ def own_credentials() -> tuple[str, ...]:
 
 def _direct_origin_and_client(addr: DirectAddress) -> tuple[str, httpx.Client]:
     if addr.host in ("localhost", "127.0.0.1", "::1"):
-        # RFC 0001 §4.1 permits http://localhost for local development.
         return f"http://{addr.host}:{addr.port}", httpx.Client(timeout=10.0)
-    # RFC 0001 §5.3: enforce the #sha256 pin when supplied, otherwise TOFU.
-    return addr.endpoint, make_pinned_httpx_client(addr, tofu_store=_tofu_store, timeout=10.0)
+    if addr.tls_pin_sha256:
+        return addr.endpoint, make_pinned_httpx_client(addr, tofu_store=_tofu_store, timeout=10.0)
+    # No explicit pin → peer is behind WebPKI (e.g. Traefik/Let's Encrypt).
+    # Use standard HTTPS; the envelope JWS is authoritative regardless.
+    # (SDK 0.5.0 TOFU transport has a getpeercert() compat bug on cpython 3.12.)
+    return addr.endpoint, httpx.Client(timeout=10.0)
 
 
 def resolve_recipient(to: str) -> tuple[str, str, str]:
-    """Resolve `to` to (wire identifier, A2A endpoint URL, public key). Sync."""
+    """Resolve `to` to (wire identifier, A2A endpoint URL, public key). Sync.
+
+    If `to` is a bare public-key identifier (z6Mk…) that matches an existing
+    contact, return the stored endpoint directly — no shadow-address resolution
+    needed (used by the respond/reply path).
+    """
+    if is_public_key_identifier(to):
+        with Session(engine) as s:
+            c = s.exec(select(Contact).where(Contact.identifier == to)).first()
+            if c is not None:
+                return c.identifier, c.agent_endpoint, c.public_key
+
     addr = parse_shadow_address(to)
     if isinstance(addr, ShadownameAddress):
         _, provider = addr.shadowname.split("@", 1)

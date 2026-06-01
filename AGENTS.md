@@ -3,6 +3,11 @@
 Instructions for AI coding assistants working on this codebase. Coding rules are
 in [CLAUDE.md](CLAUDE.md); protocol authority is [`../shadownet-specs/`](../shadownet-specs).
 
+## Deployment & Operations
+
+Live deployment details (VPS, containers, deploy commands, adding new agents) are
+in [`AGENTS.local.md`](AGENTS.local.md) (gitignored — private to the operator).
+
 ## What This Is
 
 A self-hosted **Sidecar** implementing the Shadownet **v0.2** protocol. It sits

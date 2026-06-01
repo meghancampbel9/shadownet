@@ -13,11 +13,7 @@ from fastapi.concurrency import run_in_threadpool
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from shadownet.crypto.jwt import decode_unverified_claims
-from shadownet.mcp.intents import (
-    ACCEPT_PLAN_V1_URI,
-    CONFIRM_PLAN_V1_URI,
-    COORDINATE_V1_URI,
-)
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -130,7 +126,12 @@ def contacts(query: str | None = None) -> dict[str, Any]:
         for c in rows:
             if query:
                 q = query.lower()
-                if q not in c.identifier.lower() and q not in c.name.lower():
+                q_norm = _normalize(query)
+                if (
+                    q not in c.identifier.lower()
+                    and q not in c.name.lower()
+                    and q_norm != _normalize(c.name)
+                ):
                     continue
             grant = s.exec(
                 select(AccessGrant)
@@ -265,9 +266,75 @@ def set_contact_profile(name: str, profile: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True}
 
 
+def _normalize(s: str) -> str:
+    """Collapse to lowercase alpha-only for fuzzy comparison."""
+    return "".join(ch for ch in s.lower() if ch.isalpha())
+
+
+def _resolve_contact_name(name: str) -> str:
+    """Resolve a contact reference to its wire identifier.
+
+    MCP callers pass whatever label feels natural — a display name, a
+    shadowname, a bare public key, or a full shadow:// URI. This
+    function tries each interpretation in order of specificity so that
+    unambiguous forms win and fuzzy matching is the last resort.
+
+    Resolution order:
+      1. Exact identifier match (z6Mk… public key or shadowname).
+      2. shadow:// URI — return as-is for resolve_recipient to parse.
+      3. Case-insensitive display name match against contacts.
+      4. Substring match (unique) — handles partial names the LLM
+         might shorten ("Test" → "Test Friend" if unambiguous).
+      5. Normalized match — strip all non-alpha, compare. Catches
+         typos with misplaced spaces ("testf riend" → "Test Friend").
+      6. Fall through — return the input unchanged and let
+         resolve_recipient handle it (or fail with a clear error).
+    """
+    stripped = name.strip()
+    if not stripped:
+        return name
+
+    if stripped.startswith("shadow://"):
+        return stripped
+
+    with _session() as s:
+        by_id = s.exec(
+            select(Contact).where(Contact.identifier == stripped)
+        ).first()
+        if by_id is not None:
+            return by_id.identifier
+
+        by_name = s.exec(
+            select(Contact).where(func.lower(Contact.name) == stripped.lower())
+        ).first()
+        if by_name is not None:
+            return by_name.identifier
+
+        all_contacts = s.exec(select(Contact)).all()
+
+        matches = [
+            c for c in all_contacts
+            if stripped.lower() in c.name.lower()
+        ]
+        if len(matches) == 1:
+            return matches[0].identifier
+
+        query_norm = _normalize(stripped)
+        if query_norm:
+            norm_matches = [
+                c for c in all_contacts
+                if _normalize(c.name) == query_norm
+            ]
+            if len(norm_matches) == 1:
+                return norm_matches[0].identifier
+
+    return name
+
+
 @mcp.tool()
 async def send(to: str, body: dict[str, Any], contextId: str | None = None) -> dict[str, Any]:
-    """Send a Shadownet envelope. End your turn after calling this."""
+    """Send a Shadownet envelope. `to` can be a shadowname, public key, shadow:// URI, or display name. End your turn after calling this."""
+    to = _resolve_contact_name(to)
     result = await send_message(
         to,
         text=body.get("text"),
@@ -310,47 +377,17 @@ async def respond(contextId: str, body: dict[str, Any]) -> dict[str, Any]:
     return {"messageId": result.message_id, "status": result.status, "error": result.error}
 
 
-@mcp.tool()
-async def coordinate(name: str, activity: str, details: str | None = None) -> dict[str, Any]:
-    """Start a coordination flow with a contact (RFC 0002 §5.1). End your turn after."""
-    data = {"activity": activity}
-    if details:
-        data["details"] = details
-    text = f"Let's coordinate {activity}" + (f" — {details}" if details else "")
-    result = await send_message(name, text=text, intent=COORDINATE_V1_URI, data=data)
-    return {"messageId": result.message_id, "contextId": result.context_id}
-
-
-@mcp.tool()
-async def confirm_plan(name: str, contextId: str, plan: dict[str, Any]) -> dict[str, Any]:
-    """Confirm an agreed plan (RFC 0002 §5.2)."""
-    result = await send_message(
-        name,
-        text=f"Confirming: {plan.get('activity', 'plan')} at {plan.get('when', '')}",
-        intent=CONFIRM_PLAN_V1_URI,
-        data=plan,
-        context_id=contextId,
-    )
-    return {"messageId": result.message_id}
-
-
-@mcp.tool()
-async def accept_plan(name: str, contextId: str, acceptsMessageId: str) -> dict[str, Any]:
-    """Accept a peer's confirmed plan (RFC 0002 §5.3)."""
-    result = await send_message(
-        name,
-        text="Accepted.",
-        intent=ACCEPT_PLAN_V1_URI,
-        data={"acceptsMessageId": acceptsMessageId},
-        context_id=contextId,
-    )
-    return {"messageId": result.message_id}
+def _sender_display_name(identifier: str) -> str | None:
+    """Look up a contact's display name by wire identifier."""
+    with _session() as s:
+        c = s.exec(select(Contact).where(Contact.identifier == identifier)).first()
+        return c.name if c and c.name else None
 
 
 def _message_to_item(m: Message) -> dict[str, Any]:
     import json
 
-    return {
+    item: dict[str, Any] = {
         "messageId": m.message_id,
         "contextId": m.context_id,
         "from": m.sender,
@@ -358,6 +395,10 @@ def _message_to_item(m: Message) -> dict[str, Any]:
         "status": m.route,
         "body": json.loads(m.body_json),
     }
+    display = _sender_display_name(m.sender)
+    if display:
+        item["fromName"] = display
+    return item
 
 
 @mcp.tool()
@@ -440,18 +481,22 @@ def _drain_events(cutoff: datetime) -> tuple[list[dict[str, Any]], str | None]:
     high_water: str | None = None
     for m in rows:
         event_id = f"{m.created_at.isoformat()}|{m.id}"
+        data: dict[str, Any] = {
+            "messageId": m.message_id,
+            "contextId": m.context_id,
+            "from": m.sender,
+            "intent": m.intent or None,
+            "status": m.route,
+        }
+        display = _sender_display_name(m.sender)
+        if display:
+            data["fromName"] = display
         events.append(
             {
                 "eventId": event_id,
                 "event": "inbox.message",
                 "occurredAt": int(m.created_at.timestamp()),
-                "data": {
-                    "messageId": m.message_id,
-                    "contextId": m.context_id,
-                    "from": m.sender,
-                    "intent": m.intent or None,
-                    "status": m.route,
-                },
+                "data": data,
             }
         )
         high_water = event_id
