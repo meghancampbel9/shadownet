@@ -298,9 +298,7 @@ def _resolve_contact_name(name: str) -> str:
         return stripped
 
     with _session() as s:
-        by_id = s.exec(
-            select(Contact).where(Contact.identifier == stripped)
-        ).first()
+        by_id = s.exec(select(Contact).where(Contact.identifier == stripped)).first()
         if by_id is not None:
             return by_id.identifier
 
@@ -312,19 +310,13 @@ def _resolve_contact_name(name: str) -> str:
 
         all_contacts = s.exec(select(Contact)).all()
 
-        matches = [
-            c for c in all_contacts
-            if stripped.lower() in c.name.lower()
-        ]
+        matches = [c for c in all_contacts if stripped.lower() in c.name.lower()]
         if len(matches) == 1:
             return matches[0].identifier
 
         query_norm = _normalize(stripped)
         if query_norm:
-            norm_matches = [
-                c for c in all_contacts
-                if _normalize(c.name) == query_norm
-            ]
+            norm_matches = [c for c in all_contacts if _normalize(c.name) == query_norm]
             if len(norm_matches) == 1:
                 return norm_matches[0].identifier
 
