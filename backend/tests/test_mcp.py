@@ -59,9 +59,6 @@ def test_tool_names_registered(app_ready):
         "set_contact_profile",
         "send",
         "respond",
-        "coordinate",
-        "confirm_plan",
-        "accept_plan",
         "inbox",
         "inbox_wait",
     }

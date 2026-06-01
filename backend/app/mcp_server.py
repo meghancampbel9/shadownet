@@ -333,7 +333,10 @@ def _resolve_contact_name(name: str) -> str:
 
 @mcp.tool()
 async def send(to: str, body: dict[str, Any], contextId: str | None = None) -> dict[str, Any]:
-    """Send a Shadownet envelope. `to` can be a shadowname, public key, shadow:// URI, or display name. End your turn after calling this."""
+    """Send a Shadownet envelope.
+
+    `to` can be a shadowname, public key, shadow:// URI, or display name.
+    End your turn after calling this."""
     to = _resolve_contact_name(to)
     result = await send_message(
         to,
