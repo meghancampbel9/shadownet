@@ -6,16 +6,15 @@
 # Requires TRAEFIK_HOST in .env
 # Routes: https://shadownet.${TRAEFIK_HOST}
 #
-# Note: the base compose exposes ports 8340/8341 on the host. If you only
-# want Traefik access, set SHADOWNET_PORT and SHADOWNET_MCP_PORT
-# to unused high ports, or bind to 127.0.0.1 in your .env:
+# Note: the base compose exposes port 8340 on the host. If you only want
+# Traefik access, set SHADOWNET_PORT to an unused high port or bind to
+# 127.0.0.1 in your .env:
 #   SHADOWNET_PORT=127.0.0.1:8340
 
 services:
   shadownet:
     expose:
       - "8340"
-      - "8341"
     labels:
       - traefik.enable=true
       - traefik.http.routers.shadownet.rule=Host(`shadownet.${TRAEFIK_HOST}`)

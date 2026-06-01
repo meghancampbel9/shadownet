@@ -14,14 +14,14 @@ def _new_id() -> str:
     return str(uuid.uuid4())
 
 
-# ── Enums ──────────────────────────────────────────────────────────────────
-
-
 class GrantType:
     messaging = "messaging"
 
 
-# ── Tables ─────────────────────────────────────────────────────────────────
+class Route:
+    inbox = "inbox"
+    stranger_review = "stranger_review"
+    outbound = "outbound"
 
 
 class User(SQLModel, table=True):
@@ -38,15 +38,16 @@ class Contact(SQLModel, table=True):
     __tablename__ = "contacts"
 
     id: str = Field(default_factory=_new_id, primary_key=True)
-    name: str
-    agent_endpoint: str
-    agent_public_key: str = ""
-    did: str = ""
-    shadowname: str = ""
-    public_key_jwk: str = "{}"
+    identifier: str = Field(index=True)  # wire id: shadowname or z6Mk public key
+    name: str = ""
+    public_key: str = ""  # multibase Ed25519 (z6Mk...)
+    agent_endpoint: str = ""
     label: str = ""
     notes: str = ""
+    profile_json: str = "{}"  # RFC 0002 §6 ContactProfile (local-only)
     metadata_json: str = "{}"
+    added_at: datetime = Field(default_factory=_utcnow)
+    last_seen: datetime | None = None
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
 
@@ -62,16 +63,48 @@ class AccessGrant(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=_utcnow)
 
 
-class InteractionContext(SQLModel, table=True):
-    __tablename__ = "interaction_contexts"
+class Message(SQLModel, table=True):
+    __tablename__ = "messages"
 
     id: str = Field(default_factory=_new_id, primary_key=True)
-    a2a_task_id: str = Field(default="", index=True)
-    intent_id: str = ""
-    data_type: str = ""
-    contact_id: str = Field(foreign_key="contacts.id", index=True)
-    direction: str = "inbound"
-    status: str = "received"
-    context_data: str = "{}"
+    message_id: str = Field(index=True)  # wire A2A messageId
+    context_id: str = Field(default="", index=True)
+    sender: str = ""  # envelope `from`
+    recipient: str = ""  # envelope `to`
+    direction: str = "inbound"  # inbound | outbound
+    route: str = Route.inbox  # inbox | stranger_review | outbound
+    intent: str = ""  # body.intent URI
+    body_json: str = "{}"  # {text?, intent?, data?}
+    contact_id: str = Field(default="", index=True)
     created_at: datetime = Field(default_factory=_utcnow)
-    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class ReplayEntry(SQLModel, table=True):
+    __tablename__ = "replay_entries"
+
+    id: str = Field(default_factory=_new_id, primary_key=True)
+    sender: str = Field(index=True)
+    message_id: str = Field(index=True)
+    expires_at: datetime = Field(default_factory=_utcnow)
+
+
+class OutboundContext(SQLModel, table=True):
+    __tablename__ = "outbound_contexts"
+
+    id: str = Field(default_factory=_new_id, primary_key=True)
+    context_id: str = Field(index=True)
+    peer: str = Field(index=True)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class OnboardToken(SQLModel, table=True):
+    __tablename__ = "onboard_tokens"
+
+    id: str = Field(default_factory=_new_id, primary_key=True)
+    subject: str = ""  # the Subject (user id) this token acts for
+    kind: str = "access"  # access | refresh | handoff
+    token: str = Field(index=True, unique=True)
+    family_id: str = Field(default_factory=_new_id, index=True)
+    revoked: bool = False
+    expires_at: datetime | None = None
+    created_at: datetime = Field(default_factory=_utcnow)

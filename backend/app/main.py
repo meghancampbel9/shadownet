@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.config import settings
+from app.config import settings, validate_shadowname_at_startup
 from app.database import init_db
 from app.identity import init_identity
 
@@ -25,13 +25,12 @@ async def lifespan(app: FastAPI):
     init_db()
     init_identity()
 
-    from app.config import validate_shadowname_at_startup
     from app.mcp_auth import mcp_lifespan
-    from app.signing import init_protocol
+    from app.protocol import init as protocol_init
 
-    init_protocol()
+    protocol_init()
     validate_shadowname_at_startup()
-    logger.info("Agent card (A2A v1.0): %s/.well-known/agent-card.json", settings.external_url)
+    logger.info("AgentCard (A2A v1.0): %s/.well-known/agent-card.json", settings.external_url)
 
     async with mcp_lifespan():
         yield
@@ -41,8 +40,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="shadownet",
-    description="Agent-to-agent communication layer",
-    version="0.3.0",
+    description="Shadownet v0.2 Sidecar",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -55,53 +54,37 @@ app.add_middleware(
     expose_headers=["Mcp-Session-Id"],
 )
 
-# ── Routers ────────────────────────────────────────────────────────────────
-
+from app.onboarding import router as onboarding_router  # noqa: E402
 from app.routers.a2a import router as a2a_router  # noqa: E402
 from app.routers.auth import router as auth_router  # noqa: E402
 from app.routers.contacts import router as contacts_router  # noqa: E402
-from app.routers.interactions import router as interactions_router  # noqa: E402
 from app.routers.messages import router as messages_router  # noqa: E402
 
 app.include_router(a2a_router)
 app.include_router(auth_router, prefix="/api")
 app.include_router(contacts_router, prefix="/api")
-app.include_router(interactions_router, prefix="/api")
 app.include_router(messages_router, prefix="/api")
-
-# RFC-0008 onboarding surface (integration-bundle, /connect pages)
-from app.connect import get_connect_router  # noqa: E402
-
-app.include_router(get_connect_router())
-
-# ── Health ─────────────────────────────────────────────────────────────────
+app.include_router(onboarding_router)
 
 
 @app.get("/health")
 def health():
-    from app.identity import get_did, get_public_key_b64
+    from app.identity import connection_uri, get_public_key, get_subject
 
     return {
         "status": "ok",
         "agent": settings.agent_name,
         "owner": settings.owner_name,
-        "did": get_did(),
-        "public_key": get_public_key_b64(),
+        "subject": get_subject(),
+        "pk": get_public_key(),
+        "connectionUri": connection_uri(),
     }
 
 
-# ── Authenticated MCP (RFC-0007 per-tenant endpoint) ──────────────────────
-
 from app.mcp_auth import get_authenticated_mcp_app  # noqa: E402
 
-_mcp_mount_path = f"/u/{settings.shadowname}" if settings.shadowname else ""
-if _mcp_mount_path:
-    app.mount(_mcp_mount_path, get_authenticated_mcp_app())
-else:
-    app.mount("/mcp-auth", get_authenticated_mcp_app())
+app.mount(f"/u/{settings.mcp_label}", get_authenticated_mcp_app())
 
-
-# ── SPA static files (must be last) ───────────────────────────────────────
 
 if STATIC_DIR.is_dir():
     app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")

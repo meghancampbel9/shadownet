@@ -26,6 +26,6 @@ COPY --from=frontend /build/dist /app/static
 
 RUN mkdir -p /app/data/identity
 
-EXPOSE 8340 8341
+EXPOSE 8340
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8340 & uvicorn app.mcp_run:app --host 0.0.0.0 --port 8341 & wait"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8340"]

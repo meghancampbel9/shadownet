@@ -1,5 +1,5 @@
 import type {
-  TokenResponse, Contact, Interaction, AgentMessage, HealthResponse,
+  TokenResponse, Contact, Message, HealthResponse, ConnectResponse,
 } from "./types";
 
 class ApiError extends Error {
@@ -55,7 +55,7 @@ export const api = {
 
   listContacts: () => request<Contact[]>("/api/contacts"),
   getContact: (id: string) => request<Contact>(`/api/contacts/${id}`),
-  addContact: (data: { agent_endpoint: string; name?: string; label?: string; notes?: string; metadata?: Record<string, unknown> }) =>
+  addContact: (data: { identifier: string; name?: string; label?: string; notes?: string; profile?: Record<string, unknown> }) =>
     request<Contact>("/api/contacts", { method: "POST", body: JSON.stringify(data) }),
   updateContact: (id: string, data: Record<string, unknown>) =>
     request<Contact>(`/api/contacts/${id}`, { method: "PUT", body: JSON.stringify(data) }),
@@ -64,10 +64,11 @@ export const api = {
   updateGrant: (id: string, allowed: boolean) =>
     request<Contact>(`/api/contacts/${id}/grant`, { method: "PUT", body: JSON.stringify({ allowed }) }),
 
-  listInteractions: (limit = 50) =>
-    request<Interaction[]>(`/api/interactions?limit=${limit}`),
+  listMessages: (limit = 50, offset = 0) =>
+    request<Message[]>(`/api/messages?limit=${limit}&offset=${offset}`),
 
-  listMessages: (limit = 50, offset = 0) => {
-    return request<AgentMessage[]>(`/api/messages?limit=${limit}&offset=${offset}`);
-  },
+  mintConnect: (form: "handoff" | "inline" = "handoff") =>
+    request<ConnectResponse>(`/api/onboard/connect?form=${form}`, { method: "POST" }),
+
+  getHealth: () => request<HealthResponse>("/health", {}, true),
 };

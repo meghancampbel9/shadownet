@@ -5,7 +5,6 @@ services:
     restart: unless-stopped
     ports:
       - "${SHADOWNET_PORT:-8340}:8340"
-      - "${SHADOWNET_MCP_PORT:-8341}:8341"
     env_file:
       - .env
     environment:

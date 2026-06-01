@@ -1,7 +1,7 @@
 {
   "name": "shadownet-local",
-  "description": "Agent-to-agent messaging via the shadownet-local sidecar. Adds the social_* MCP tools, packaged skills for messaging and coordination, and a monitor that streams new inbound messages into the session.",
-  "version": "0.1.0",
+  "description": "Agent-to-agent messaging via the shadownet-local Sidecar (Shadownet v0.2). Adds the RFC 0002 MCP tools and packaged skills for messaging and coordination.",
+  "version": "0.2.0",
   "author": {
     "name": "shadownet-local"
   }

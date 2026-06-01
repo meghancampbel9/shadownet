@@ -1,11 +1,12 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { LayoutDashboard, Users, MessageSquare, LogOut } from "lucide-react";
+import { LayoutDashboard, Users, MessageSquare, Link2, LogOut } from "lucide-react";
 
 const links = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/contacts", icon: Users, label: "Contacts" },
   { to: "/messages", icon: MessageSquare, label: "Messages" },
+  { to: "/connect", icon: Link2, label: "Connect" },
 ] as const;
 
 export function Shell() {
